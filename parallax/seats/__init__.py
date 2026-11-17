@@ -15,3 +15,8 @@ def make_seats(cfg: Config) -> dict[str, Seat]:
         if seat_cfg.adapter not in ADAPTERS:
             raise ConfigError(f"seats.{seat_cfg.name}.adapter: unknown adapter {seat_cfg.adapter!r}")
     return {seat_cfg.name: ADAPTERS[seat_cfg.adapter](seat_cfg, cfg) for seat_cfg in cfg.seats}
+
+
+from parallax.seats.codex import CodexSeat
+
+ADAPTERS["codex"] = lambda seat, cfg: CodexSeat(seat, cfg)
