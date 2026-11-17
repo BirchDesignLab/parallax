@@ -94,8 +94,8 @@ Ways this could run and still be a failure:
 
 The blind is enforced where each CLI can enforce it and audited everywhere. Seats are treated as fallible, not hostile, and no receipt claims more than that.
 
-- **Placement.** Each seat's worktree is a separate clone of the project with no git link to the other seat's. It sits under a random name in a state folder inside the human's profile (`%LOCALAPPDATA%\parallax` by default), outside the repo. A seat is told only its own path. Nothing a seat produces enters the project's own repo until the task lands.
-- **Confinement.** Codex runs in its `workspace-write` sandbox. On this machine that sandbox runs commands as a separate Windows user, which was refused both reads and writes in a second folder beside its own (verified 2026-11-16). Claude gets file tools restricted to its own worktree and no shell at all. Those flags are accepted, but their effect is not yet verified because the Claude CLI is not signed in.
+- **Placement.** Each seat's worktree is a separate clone of the project with no git link to the other seat's. It sits under a random name in a state folder in the human's home folder (`~/.parallax` by default), outside the repo. A seat is told only its own path. Nothing a seat produces enters the project's own repo until the task lands. The state folder must not be under `%LOCALAPPDATA%` or `%APPDATA%`: a process started from a packaged app (Claude's desktop app is one) has new folders there silently redirected, and Codex's sandbox then cannot find them.
+- **Confinement.** Each task's folder in the state folder is made private before anything is put in it: its permissions name only the human's account, SYSTEM and Administrators, and everything inside inherits that. Codex runs in its `workspace-write` sandbox, which on this machine runs commands as a separate Windows user. Codex adds entries for that user to the one clone it works in and to nothing else, so the other seat's clone, the scratch clones and the artifacts stay closed to it. A sandboxed read of a private sibling folder was refused ("Access is denied") in `%TEMP%`. Claude gets file tools restricted to its own worktree and no shell at all. Those flags are accepted, but their effect is not yet verified because the Claude CLI is not signed in.
 - **Seal.** Readings and attempts are hashed into the ledger before reveal, so nothing can be adjusted afterwards.
 - **Audit.** Both CLIs emit an event stream of what a seat did. After each attempt the conductor scans it for any path belonging to the other seat or to the state folder. This is the second line of defense and it is best effort: a script that reads another worktree without naming it would get past.
 - **Voiding.** A hit voids the attempt, and the contamination goes with it: the session, the worktree and everything the attempt produced are discarded. The rerun is a new session in a new worktree, starting from the contract alone.
@@ -222,7 +222,9 @@ Done means: the stub-seat test suite passes, and the demo completes with real se
 
 **Changed by the smoke test (`scripts/probes/seat_smoke.py`), Claude's calls for the human to check:**
 
-- Seat worktrees are separate clones in a state folder under the human's profile, not linked git worktrees. Linked worktrees would let one seat find the other through git, and seat commits would sit in the project's repo where the other seat could read them.
+- Seat worktrees are separate clones in a state folder in the human's home folder (`~/.parallax`), not linked git worktrees. Linked worktrees would let one seat find the other through git, and seat commits would sit in the project's repo where the other seat could read them.
+- Each task's folder there is made private (the human's account, SYSTEM and Administrators only) before use, and the conductor checks that the other seat's clone is still private before every seat call.
+- When a task ends, the Codex seat removes the trust entries Codex added to the human's `~/.codex/config.toml` for that task's folders. This is the one place the framework edits a file outside its own folders.
 - Seats do not run checks; the conductor does. Neither side can run the other's half before the crossing anyway, and Codex's sandbox cannot run Python here.
 - Because seats run nothing, the Claude seat gets no shell at all, which is stronger than the allowlist first proposed.
 - Pre-crossing artifacts live in the state folder, not in `.parallax/run/`.
@@ -239,8 +241,12 @@ Verified on this machine during round 0:
 
 Verified by `scripts/probes/seat_smoke.py` on 2026-11-16:
 
-- `codex exec --ignore-user-config -c windows.sandbox="elevated" --sandbox workspace-write`, run in a folder under the profile, writes files there. `--output-schema` shapes the final message and `-o` captures it. With `--ignore-user-config` alone, every command is "rejected: blocked by policy".
-- That sandbox runs commands as the Windows user `CodexSandboxOffline`, and it was refused both a read and a write in a second folder beside its own ("Access is denied").
+- `codex exec --ignore-user-config -c windows.sandbox="elevated" --sandbox workspace-write` writes files in the folder it is started in. `--output-schema` shapes the final message and `-o` captures it. With `--ignore-user-config` alone, every command is "rejected: blocked by policy".
+- That sandbox runs commands as the Windows user `CodexSandboxOffline`. What it can read is decided by folder permissions, not by the sandbox mode. An ordinary folder under the profile inherits an entry for `CodexSandboxUsers` and is readable by it: in one run it read a file in a sibling folder. A folder whose permissions name only the human's account, SYSTEM and Administrators was refused ("Access is denied").
+- Under `%LOCALAPPDATA%`, every sandboxed command failed to start (`CreateProcessWithLogonW failed: 267`). The cause is not permissions: Claude's desktop app is a packaged app, so a folder this session creates under `%LOCALAPPDATA%` really lives in the package's private cache, and the sandbox user is told to start in a folder that does not exist for it. `%TEMP%` and the home folder are not redirected.
+- With the seat's clone in a private folder under the home folder: sandboxed commands start, and the human's account can read and delete the files they create. Under a folder that is owner-only (what `tempfile.mkdtemp` makes), the human's account could delete such files but not read them, so that arrangement is ruled out.
+- Codex appends a `[projects.'<folder>'] trust_level = "trusted"` entry to the human's `~/.codex/config.toml` for every new folder it runs in, even with `--ignore-user-config`.
+- Asking a model to read or write another folder as a test trips OpenAI's safety system ("possible cybersecurity risk") and fails the turn. The probes no longer do that; isolation is judged from the folders' permissions.
 - `codex exec resume <thread id>` continues a session headless. It takes no `--sandbox` flag, so `-c sandbox_mode="workspace-write"` is passed instead, and it works.
 - Codex's event stream: `thread.started` carries the session id; `item.completed` of type `command_execution` carries each command with its output and exit code; `turn.completed` carries token usage.
 - Inside the Codex sandbox `python`, `py` and `uv` do not resolve, though `git` and `node` do. They are installed under the human's profile.
@@ -253,7 +259,7 @@ Not yet verified. All but the last need the human to run `claude auth login` fir
 - Claude refusing reads outside its folder under `--restricted`.
 - Claude resuming a session headless.
 - Claude and Codex running at the same moment. Codex's side passed.
-- Codex's sandbox refusing the other seat's worktree when both live under `%LOCALAPPDATA%\parallax` rather than `%TEMP%`.
+- A sandboxed read of a private sibling folder under the home folder being refused. Its permissions say it will be (they list no sandbox entry), and the same permissions were refused in `%TEMP%`, but the attempt itself was not repeated there. A model-free test needs `codex sandbox`, which requires a `[permissions]` profile that has not been worked out.
 
 ## Left to the builder
 

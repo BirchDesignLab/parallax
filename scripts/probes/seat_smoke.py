@@ -9,6 +9,8 @@ updates.
 Cases (run all, or name some on the command line):
   claude_auth      is the standalone CLI signed in (with and without our env)?
   codex_env        which tools a sandboxed Codex command can see, per sandbox mode
+  codex_acl        which folder permissions let a Codex seat work, stay blind,
+                   and leave files this account can read
   claude_schema    structured output via --json-schema; shape of the result
   claude_confined  unattended edits in cwd with file tools only; reads outside
                    the folder refused; no shell tool available
@@ -19,16 +21,22 @@ Cases (run all, or name some on the command line):
   together         both CLIs running at the same moment
 
 Cost: a handful of tiny prompts on each subscription.
-Side effects: a temp folder (path printed at the end; delete it when done)
-and persisted sessions for the two resume cases, which the script removes
-(`codex delete --force`, `claude purge -y` on the temp worktree).
+Side effects:
+- A fixture folder per run (path printed at the end). `--clean` removes them all.
+- Persisted sessions for the two resume cases, which the script removes
+  (`codex delete --force`, `claude purge -y` on the temp worktree).
+- Codex appends a `[projects.'<folder>'] trust_level = "trusted"` entry to the
+  human's ~/.codex/config.toml for every new folder it runs in, even with
+  --ignore-user-config. This probe does not remove those.
 
 Usage:
     python scripts/probes/seat_smoke.py [case ...]
+    python scripts/probes/seat_smoke.py --clean
 """
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -85,13 +93,44 @@ def git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 
 
+def lock_down(path: Path) -> None:
+    """Give an empty folder a protected ACL naming only this account, SYSTEM and Administrators.
+
+    Finding (2026-11-16), which this recipe answers:
+    - A folder that merely inherits the profile's ACL is READABLE by Codex's
+      sandbox user, so one seat could read the other seat's folder.
+    - A folder with an owner-only ACL (what tempfile.mkdtemp makes) is not
+      readable by the sandbox, but files the sandbox creates in its own such
+      folder are then unreadable and undeletable by this account.
+    Naming this account explicitly, inheritably, and nobody else, gives both:
+    the other seat's folder is closed to the sandbox, and whatever the sandbox
+    writes in its own folder (to which Codex adds its own entries) stays ours.
+    """
+    if os.name != "nt":
+        return
+    me = subprocess.run(["whoami"], capture_output=True, text=True, check=True).stdout.strip()
+    subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r", f"{me}:(OI)(CI)F",
+                    "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F"],
+                   capture_output=True, text=True, check=True)
+
+
 def make_fixture() -> Fixture:
     # PARALLAX_SMOKE_ROOT lets the fixture live where real seat clones will
     # (for example %LOCALAPPDATA%\parallax), to check the sandbox there too.
+    #
+    # Finding (2026-11-16): tempfile.mkdtemp gives the folder an owner-only
+    # ACL on Windows. Files that Codex's sandbox user then creates inside it
+    # are owned by that user, and this account can neither read nor delete
+    # them. A folder made with plain mkdir inherits the profile's ACL, which
+    # names this account explicitly. So: mkdtemp by default (to keep showing
+    # the trap), plain mkdir when PARALLAX_SMOKE_ROOT is set.
     parent = os.environ.get("PARALLAX_SMOKE_ROOT")
     if parent:
         Path(parent).mkdir(parents=True, exist_ok=True)
-    root = Path(tempfile.mkdtemp(prefix="parallax-smoke-", dir=parent))
+        root = Path(parent) / ("parallax-smoke-" + uuid.uuid4().hex[:8])
+        root.mkdir()
+    else:
+        root = Path(tempfile.mkdtemp(prefix="parallax-smoke-"))
     repo = root / "repo"
     (repo / "src").mkdir(parents=True)
     (repo / "tests").mkdir()
@@ -104,6 +143,10 @@ def make_fixture() -> Fixture:
         "commit", "-m", "fixture")
     wt_a = root / "wt-a"
     wt_b = root / "wt-b"
+    for wt in (wt_a, wt_b):
+        wt.mkdir()
+        if not os.environ.get("PARALLAX_SMOKE_NO_LOCK"):   # set it to reproduce the unlocked runs
+            lock_down(wt)
     git(repo, "worktree", "add", "-b", "seat-a", str(wt_a))
     git(repo, "worktree", "add", "-b", "seat-b", str(wt_b))
     canary = "CANARY-" + uuid.uuid4().hex[:12]
@@ -309,30 +352,42 @@ def codex_write(fx: Fixture) -> None:
     schema_path = fx.out / "codex_write.schema.json"
     schema_path.write_text(json.dumps({
         "type": "object",
-        "properties": {"created": {"type": "boolean"}, "secret_read": {"type": "boolean"},
-                       "secret_text": {"type": "string"}, "intruder_written": {"type": "boolean"}},
-        "required": ["created", "secret_read", "secret_text", "intruder_written"],
+        "properties": {"created": {"type": "boolean"}, "python_ran": {"type": "boolean"}},
+        "required": ["created", "python_ran"],
         "additionalProperties": False}))
     last = fx.out / "codex_write.last.json"
-    intruder = fx.wt_b / "intruder.txt"
+    # This prompt used to ask Codex to read and write files in the OTHER seat's
+    # folder, to test the sandbox. On 2026-11-16 OpenAI's safety system flagged
+    # such prompts ("possible cybersecurity risk") and failed the turn. That is
+    # a guardrail on the human's account, so the probe no longer asks a model
+    # to cross a folder boundary. Isolation is judged from the folders'
+    # permissions instead (see `principals` and the codex_acl case).
     prompt = (
         "Do these steps in order, then stop.\n"
         "1. Create a file named hello_codex.txt in the current directory containing exactly: hi\n"
         "2. Run: python -m unittest --help\n"
-        f"3. Try to print the contents of {fx.secret} with a shell command.\n"
-        f"4. Try to create the file {intruder} containing: x\n"
-        "Answer in the required JSON. created: whether step 1 worked. secret_read: whether "
-        "step 3 printed the file. secret_text: what it printed, or the error. "
-        "intruder_written: whether step 4 worked."
+        "Answer in the required JSON. created: whether step 1 worked. "
+        "python_ran: whether step 2 printed unittest's help."
     )
     r = run(fx, "codex_write",
             [CODEX, "exec", *CODEX_PIN, *CODEX_LEAN, "--sandbox", "workspace-write",
              "-C", str(fx.wt_a), "--ephemeral", "--color", "never", "--json",
              "--output-schema", str(schema_path), "-o", str(last), "-"],
             fx.wt_a, prompt)
-    show("hello_codex.txt exists", (fx.wt_a / "hello_codex.txt").exists())
-    show("intruder.txt exists in the OTHER worktree", intruder.exists())
-    show("canary leaked into stdout", fx.canary in r.out)
+    hello = fx.wt_a / "hello_codex.txt"
+    show("hello_codex.txt exists", hello.exists())
+    # The conductor must be able to commit and clean up what a seat wrote.
+    try:
+        show("this account can read what codex wrote", repr(hello.read_text(encoding="utf-8")))
+    except OSError as exc:
+        show("this account can read what codex wrote", f"NO: {exc}")
+    try:
+        hello.unlink()
+        show("this account can delete what codex wrote", True)
+    except OSError as exc:
+        show("this account can delete what codex wrote", f"NO: {exc}")
+    show("permissions on the seat's own folder", principals(fx.wt_a))
+    show("permissions on the other folder", principals(fx.wt_b))
     show("last message file", last.read_text(encoding="utf-8") if last.exists() else "(missing)")
     rows = jsonl(r.out)
     if rows:
@@ -441,8 +496,161 @@ def codex_env(fx: Fixture) -> None:
             show("stderr tail", r.err[-300:])
 
 
+def codex_acl(fx: Fixture) -> None:
+    """Which folder permissions let a Codex seat work, stay blind, and leave files we can read?
+
+    The other seat's folder is always locked down. The seat's own folder is a
+    clone whose parent's permissions vary (see the comment in the loop).
+    For each: can sandboxed commands start (and after how many tries), can the
+    sandbox read the other folder, and can this account read and delete a file
+    the sandbox created with a shell command?
+    """
+    schema_path = fx.out / "codex_acl.schema.json"
+    schema_path.write_text(json.dumps({
+        "type": "object",
+        "properties": {"tries": {"type": "integer"}, "whoami": {"type": "string"},
+                       "wrote": {"type": "boolean"}},
+        "required": ["tries", "whoami", "wrote"],
+        "additionalProperties": False}))
+    # Findings so far (2026-11-16): a seat folder locked down directly, and a
+    # non-git folder run with --skip-git-repo-check, both fail every command
+    # with "CreateProcessWithLogonW failed: 267". So each variant below is a
+    # real clone, and differs only in what its PARENT folder's permissions are:
+    #   plain               parent inherits the profile's permissions
+    #   inherit_locked      parent locked down (this account, SYSTEM, Administrators)
+    #   inherit_owner_only  parent made with mode 0o700 (owner only), as mkdtemp does
+    #
+    # Under %LOCALAPPDATA%\parallax, clones failed with 267 whatever the parent's
+    # permissions, though the folders' ACLs had the same shape as a working
+    # worktree under %TEMP%. So a variant is now "<where>:<parent>:<kind>":
+    #   where   temp | appdata      (%TEMP% or %LOCALAPPDATA%\parallax)
+    #   parent  owner | plain | locked
+    #   kind    worktree | clone
+    #
+    # Results (2026-11-16), each run once or twice:
+    #   temp:owner:worktree, temp:owner:clone   commands run; the locked sibling was refused
+    #                                           ("Access is denied"); but this account could
+    #                                           not READ files the sandbox created (it could
+    #                                           delete them)
+    #   appdata:*                               every command fails with 267 (redirected folder)
+    #   home:locked:clone, home:plain:clone     commands run; this account can read and
+    #                                           delete what the sandbox created
+    # The arrangement the design uses is therefore home:locked:clone, the default here.
+    default = "home:locked:clone"
+    wanted = os.environ.get("PARALLAX_SMOKE_ACL", default).split(",")
+    for variant in wanted:
+        where, parent_kind, kind = variant.split(":")
+        # Finding (2026-11-16): the "appdata" failures were not about permissions.
+        # Claude's desktop app is an MSIX package, and a process started from it
+        # has new folders under %LOCALAPPDATA% redirected into the package's
+        # private LocalCache. Codex's sandbox user, outside the package, is then
+        # told to start in a folder that does not exist for it (error 267).
+        # %TEMP% and the home folder are not redirected. "home" tests the latter.
+        base = {"temp": Path(tempfile.gettempdir()),
+                "appdata": Path(os.environ["LOCALAPPDATA"]) / "parallax",
+                "home": Path.home() / ".parallax-probe"}[where]
+        base.mkdir(parents=True, exist_ok=True)
+        parent = base / ("plx-acl-" + uuid.uuid4().hex[:8])
+        if parent_kind == "owner":
+            os.mkdir(parent, 0o700)
+        else:
+            parent.mkdir()
+        if parent_kind == "locked":
+            lock_down(parent)
+        own = parent / "own"
+        if kind == "worktree":
+            git(fx.repo, "worktree", "add", "-b", "acl-" + uuid.uuid4().hex[:6], str(own))
+        else:
+            subprocess.run(["git", "clone", "--quiet", "-c", "core.autocrlf=false", str(fx.repo), str(own)],
+                           check=True, capture_output=True, text=True)
+            git(own, "remote", "remove", "origin")
+        other = base / (parent.name + "-other")
+        other.mkdir()
+        lock_down(other)
+        print(f"\n--- variant {variant}: own = {own}")
+        variant = variant.replace(":", "_")
+        (own / "existing.txt").write_text("already here\n")
+        # The model is not asked about `other` (see the note in codex_write).
+        prompt = (
+            "Do these steps in order, then stop.\n"
+            "1. Run: whoami   If the command fails to start, run it again, up to 4 times in total.\n"
+            "2. Run this PowerShell: [System.IO.File]::WriteAllText((Join-Path (Get-Location) "
+            "'made_by_shell.txt'), 'hi')   If it fails to start, try it once more.\n"
+            "3. Run: Get-Content existing.txt\n"
+            "Answer in the required JSON. tries: how many times you ran whoami. whoami: its output, "
+            "or the error. wrote: whether step 2 worked."
+        )
+        last = fx.out / f"codex_acl_{variant}.last.json"
+        r = run(fx, f"codex_acl_{variant}",
+                [CODEX, "exec", *CODEX_PIN, *CODEX_LEAN, "--sandbox", "workspace-write",
+                 "-C", str(own), "--ephemeral", "--color", "never",
+                 "--json", "--output-schema", str(schema_path), "-o", str(last), "-"],
+                own, prompt)
+        show("last message", last.read_text(encoding="utf-8") if last.exists() else "(missing)")
+        for row in jsonl(r.out):
+            item = row.get("item") or {}
+            if row.get("type") == "item.completed" and item.get("type") == "command_execution":
+                show("command exit / output", f"{item.get('exit_code')} / {str(item.get('aggregated_output'))[:90]}")
+        made = own / "made_by_shell.txt"
+        show("made_by_shell.txt exists", made.exists())
+        if made.exists():
+            try:
+                show("this account can read it", repr(made.read_text(encoding="utf-8")))
+            except OSError as exc:
+                show("this account can read it", f"NO: {exc}")
+            try:
+                made.unlink()
+                show("this account can delete it", True)
+            except OSError as exc:
+                show("this account can delete it", f"NO: {exc}")
+        # Isolation, judged without a model: Codex adds its sandbox entries to the
+        # folder it works in. A sibling that lists only this account, SYSTEM and
+        # Administrators has no entry the sandbox user could use.
+        show("permissions on the seat's own folder", principals(own))
+        show("permissions on the other folder", principals(other))
+
+
+def principals(path: Path) -> list[str]:
+    """Who is named in a folder's ACL, as icacls prints them (Windows only)."""
+    if os.name != "nt":
+        return []
+    done = subprocess.run(["icacls", str(path)], capture_output=True, text=True)
+    names = []
+    for line in done.stdout.splitlines():
+        entry = line.replace(str(path), "").strip()
+        if ":(" in entry:
+            names.append(entry.split(":(")[0])
+    return sorted(set(names))
+
+
+def clean() -> int:
+    """Remove every fixture this probe left behind, in all three locations it has used."""
+    def force(func, path, _exc):
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+
+    bases = [Path(tempfile.gettempdir()), Path(os.environ.get("LOCALAPPDATA", "")) / "parallax",
+             Path.home() / ".parallax-probe"]
+    removed = failed = 0
+    for base in bases:
+        if not base.is_dir():
+            continue
+        for item in list(base.glob("parallax-smoke-*")) + list(base.glob("plx-acl-*")):
+            shutil.rmtree(item, onerror=force) if item.is_dir() else None
+            if item.exists():
+                failed += 1
+                print(f"  could not remove {item}")
+            else:
+                removed += 1
+        if base != bases[0] and base.is_dir() and not any(base.iterdir()):
+            base.rmdir()
+    print(f"removed {removed} leftover fixture folder(s); {failed} could not be removed")
+    return 1 if failed else 0
+
+
 CASES = {
     "claude_auth": claude_auth,
+    "codex_acl": codex_acl,
     "codex_env": codex_env,
     "claude_schema": claude_schema,
     "claude_confined": claude_confined,
@@ -454,6 +662,8 @@ CASES = {
 
 
 def main() -> int:
+    if sys.argv[1:] == ["--clean"]:
+        return clean()
     wanted = sys.argv[1:] or list(CASES)
     unknown = [name for name in wanted if name not in CASES]
     if unknown:
