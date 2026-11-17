@@ -102,7 +102,7 @@ class Rendering(unittest.TestCase):
         # Added in review: rendering must never fail on a URL, a route, or check output full of paths.
         contract = render_contract("t-1", 1, r"Add GET /users (see https://x.io/a)", "f() -> int", [], [])
         self.assertIn("Add GET /users (see https://x.io/a)", contract)
-        evidence = 'File "C:\Users\First Last\.parallax\k\t\cross\tests\test_a.py", line 3'
+        evidence = r'File "C:\Users\First Last\.parallax\k\t\cross\tests\test_a.py", line 3'
         card = render_card(Dispute("D-t-1", "check", "q", "A", "B", "x", "y", evidence))
         self.assertIn("<outside>/test_a.py", card)
         self.assertNotIn("First Last", card)
