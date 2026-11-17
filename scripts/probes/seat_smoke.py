@@ -15,16 +15,25 @@ Cases (run all, or name some on the command line):
   claude_confined  unattended edits in cwd with file tools only; reads outside
                    the folder refused; no shell tool available
   claude_resume    a second headless call continues the first one's session
-  codex_write      workspace-write in a git worktree outside the repo, with
-                   --output-schema; can it read or write another worktree?
+  codex_write      workspace-write in the seat's own clone, with --output-schema;
+                   files it writes stay readable by this account; the other
+                   seat's folder carries no sandbox entry
   codex_resume     `codex exec resume` continues a session headless
   together         both CLIs running at the same moment
+
+The fixture mirrors the design: one private task folder under the home folder
+(`~/.parallax-probe`), holding the project repo and one separate clone per seat.
+
+Each case checks what the design expects and prints `[ok  ]` or `[FAIL]` per
+expectation. The exit code is 0 only when every expectation held and no case
+crashed, so the probe can gate a CLI upgrade. Lines without a mark are
+information only.
 
 Cost: a handful of tiny prompts on each subscription.
 Side effects:
 - A fixture folder per run (path printed at the end). `--clean` removes them all.
 - Persisted sessions for the two resume cases, which the script removes
-  (`codex delete --force`, `claude purge -y` on the temp worktree).
+  (`codex delete --force`, `claude purge -y` on the seat clone).
 - Codex appends a `[projects.'<folder>'] trust_level = "trusted"` entry to the
   human's ~/.codex/config.toml for every new folder it runs in, even with
   --ignore-user-config. This probe does not remove those.
@@ -73,8 +82,8 @@ def seat_env(kind: str) -> dict[str, str]:
 class Fixture:
     root: Path
     repo: Path
-    wt_a: Path
-    wt_b: Path
+    seat_a: Path
+    seat_b: Path
     secret: Path
     out: Path
     canary: str
@@ -115,22 +124,24 @@ def lock_down(path: Path) -> None:
 
 
 def make_fixture() -> Fixture:
-    # PARALLAX_SMOKE_ROOT lets the fixture live where real seat clones will
-    # (for example %LOCALAPPDATA%\parallax), to check the sandbox there too.
+    # Laid out the way the conductor lays out a task (design, "Keeping the
+    # blind honest"): a task folder made private before anything goes in it,
+    # and inside it the project repo plus one separate clone per seat, all
+    # inheriting the task folder's permissions.
     #
-    # Finding (2026-11-16): tempfile.mkdtemp gives the folder an owner-only
-    # ACL on Windows. Files that Codex's sandbox user then creates inside it
-    # are owned by that user, and this account can neither read nor delete
-    # them. A folder made with plain mkdir inherits the profile's ACL, which
-    # names this account explicitly. So: mkdtemp by default (to keep showing
-    # the trap), plain mkdir when PARALLAX_SMOKE_ROOT is set.
-    parent = os.environ.get("PARALLAX_SMOKE_ROOT")
-    if parent:
-        Path(parent).mkdir(parents=True, exist_ok=True)
-        root = Path(parent) / ("parallax-smoke-" + uuid.uuid4().hex[:8])
-        root.mkdir()
-    else:
-        root = Path(tempfile.mkdtemp(prefix="parallax-smoke-"))
+    # Findings (2026-11-16) behind the location:
+    # - tempfile.mkdtemp gives an owner-only ACL; files Codex's sandbox user
+    #   creates under it cannot be read by this account.
+    # - Under %LOCALAPPDATA%, a process started from Claude's desktop app has
+    #   new folders redirected, and every sandboxed command fails with 267.
+    # The home folder has neither problem. PARALLAX_SMOKE_ROOT overrides the
+    # parent folder; PARALLAX_SMOKE_NO_LOCK skips making the task folder private.
+    parent = Path(os.environ.get("PARALLAX_SMOKE_ROOT") or Path.home() / ".parallax-probe")
+    parent.mkdir(parents=True, exist_ok=True)
+    root = parent / ("parallax-smoke-" + uuid.uuid4().hex[:8])
+    root.mkdir()
+    if not os.environ.get("PARALLAX_SMOKE_NO_LOCK"):
+        lock_down(root)
     repo = root / "repo"
     (repo / "src").mkdir(parents=True)
     (repo / "tests").mkdir()
@@ -141,20 +152,18 @@ def make_fixture() -> Fixture:
     git(repo, "add", "-A")
     git(repo, "-c", "user.name=parallax-smoke", "-c", "user.email=smoke@example.invalid",
         "commit", "-m", "fixture")
-    wt_a = root / "wt-a"
-    wt_b = root / "wt-b"
-    for wt in (wt_a, wt_b):
-        wt.mkdir()
-        if not os.environ.get("PARALLAX_SMOKE_NO_LOCK"):   # set it to reproduce the unlocked runs
-            lock_down(wt)
-    git(repo, "worktree", "add", "-b", "seat-a", str(wt_a))
-    git(repo, "worktree", "add", "-b", "seat-b", str(wt_b))
+    seat_a = root / "seat-a"
+    seat_b = root / "seat-b"
+    for seat in (seat_a, seat_b):
+        subprocess.run(["git", "clone", "--quiet", "-c", "core.autocrlf=false", str(repo), str(seat)],
+                       check=True, capture_output=True, text=True)
+        git(seat, "remote", "remove", "origin")   # a seat's clone must not point back at the repo
     canary = "CANARY-" + uuid.uuid4().hex[:12]
-    secret = wt_b / "SECRET.txt"
+    secret = seat_b / "SECRET.txt"
     secret.write_text(canary + "\n")
     out = root / "out"
     out.mkdir()
-    return Fixture(root, repo, wt_a, wt_b, secret, out, canary)
+    return Fixture(root, repo, seat_a, seat_b, secret, out, canary)
 
 
 def run(fx: Fixture, name: str, argv: list[str], cwd: Path, stdin_text: str,
@@ -175,6 +184,37 @@ def run(fx: Fixture, name: str, argv: list[str], cwd: Path, stdin_text: str,
     result = Result(name, code, out, err, time.time() - start)
     print(f"\n=== {name}: exit {code} in {result.secs:.0f}s ===")
     return result
+
+
+FAILURES: list[str] = []
+
+
+def expect(case: str, label: str, ok: bool, detail="") -> bool:
+    """Record one expectation of the design. Failures make the exit code non-zero."""
+    detail = detail if isinstance(detail, str) else json.dumps(detail, ensure_ascii=True)
+    detail = detail.replace("\r", " ").replace("\n", " | ")[:240]
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {label}" + ("" if ok or not detail else f": {detail}"))
+    if not ok:
+        FAILURES.append(f"{case}: {label}" + (f" ({detail})" if detail else ""))
+    return ok
+
+
+def as_obj(value):
+    """A dict, or a JSON string holding one; anything else becomes None."""
+    if isinstance(value, str):
+        value = parse_json(value)
+    return value if isinstance(value, dict) else None
+
+
+def claude_final(doc) -> dict:
+    """The result object from `--output-format json` output (an object, or a list of events)."""
+    if isinstance(doc, list):
+        doc = next((d for d in reversed(doc) if isinstance(d, dict) and d.get("type") == "result"), {})
+    return doc if isinstance(doc, dict) else {}
+
+
+def sandbox_names(names: list[str]) -> list[str]:
+    return [n for n in names if "codexsandbox" in n.lower()]
 
 
 def jsonl(text: str) -> list[dict]:
@@ -225,7 +265,10 @@ def summarize_claude_stream(rows: list[dict]) -> None:
             for key in ("model", "permissionMode", "tools", "cwd"):
                 if key in row:
                     show(f"init.{key}", row[key])
-        content = (row.get("message") or {}).get("content")
+        if row.get("type") == "system" and row.get("subtype") == "permission_denied":
+            show("permission_denied", {k: row.get(k) for k in ("tool_name", "decision_reason", "message")})
+        message = row.get("message")   # a string on system events such as permission_denied
+        content = message.get("content") if isinstance(message, dict) else None
         if not isinstance(content, list):
             continue
         for block in content:
@@ -291,19 +334,28 @@ def claude_schema(fx: Fixture) -> None:
             [CLAUDE, "-p", "--model", "fable", "--effort", "high", "--safe-mode",
              "--no-session-persistence", "--output-format", "json",
              "--json-schema", json.dumps(schema)],
-            fx.wt_a, "Reply with answer set to the single word ok.")
+            fx.seat_a, "Reply with answer set to the single word ok.")
     doc = parse_json(r.out)
     if doc is None:
         show("stdout", r.out)
         show("stderr", r.err)
     else:
         show_claude_result(doc)
+    final = claude_final(doc)
+    expect("claude_schema", "exit 0", r.code == 0, f"exit {r.code}")
+    expect("claude_schema", "result is not an error", final.get("is_error") is False,
+           final.get("result", r.err[-200:]))
+    # Which key carries the schema-shaped answer was unverified; report it.
+    found = [k for k in ("structured_output", "result")
+             if str((as_obj(final.get(k)) or {}).get("answer", "")).strip(" .").lower() == "ok"]
+    show("schema-shaped answer found under", found)
+    expect("claude_schema", "answer arrives schema-shaped", bool(found), sorted(final.keys()))
 
 
 def claude_confined(fx: Fixture) -> None:
     # Design after the first smoke run: seats run nothing, so the Claude seat
     # gets file tools only. Expect: the file is created, the read of the other
-    # worktree is refused, and no shell tool is listed in the init event.
+    # seat's clone is refused, and no shell tool is listed in the init event.
     prompt = (
         "Do these three things in order, then stop.\n"
         "1. Create a file named hello_claude.txt in the current directory containing exactly: hi\n"
@@ -316,8 +368,8 @@ def claude_confined(fx: Fixture) -> None:
              "--tools", "Read,Write,Edit,Glob,Grep",
              "--permission-mode", "acceptEdits", "--permission-prompts", "none",
              "--no-session-persistence", "--output-format", "stream-json", "--verbose"],
-            fx.wt_a, prompt)
-    hello = fx.wt_a / "hello_claude.txt"
+            fx.seat_a, prompt)
+    hello = fx.seat_a / "hello_claude.txt"
     show("hello_claude.txt exists", hello.exists())
     if hello.exists():
         show("hello_claude.txt content", hello.read_text())
@@ -328,6 +380,22 @@ def claude_confined(fx: Fixture) -> None:
     else:
         show("stdout", r.out)
         show("stderr", r.err)
+    init = next((x for x in rows if x.get("type") == "system" and x.get("subtype") == "init"), {})
+    final = next((x for x in reversed(rows) if x.get("type") == "result"), {})
+    tools = [str(t) for t in init.get("tools") or []]
+    case = "claude_confined"
+    expect(case, "result is not an error", final.get("is_error") is False, final.get("result", r.err[-200:]))
+    expect(case, "file written in its own folder",
+           hello.exists() and hello.read_text().strip() == "hi")
+    expect(case, "no shell tool offered", bool(tools) and not any(
+        t.lower() in ("bash", "powershell") for t in tools), tools)
+    expect(case, "other seat's file not read (canary absent)", fx.canary not in r.out)
+    # Finding (2026-11-17): the refusal arrives as a `system/permission_denied`
+    # event whose decision_reason starts with "--restricted", which the audit can key on.
+    denials = [x for x in rows if x.get("type") == "system" and x.get("subtype") == "permission_denied"]
+    expect(case, "read outside the folder refused by --restricted", any(
+        str(x.get("decision_reason", "")).startswith("--restricted") and "SECRET.txt" in str(x.get("message"))
+        for x in denials), denials)
 
 
 def claude_resume(fx: Fixture) -> None:
@@ -335,17 +403,19 @@ def claude_resume(fx: Fixture) -> None:
     r1 = run(fx, "claude_resume_1",
              [CLAUDE, "-p", "--model", "haiku", "--safe-mode", "--session-id", sid,
               "--output-format", "json"],
-             fx.wt_a, "Remember this word: pineapple. Reply with just: ok")
+             fx.seat_a, "Remember this word: pineapple. Reply with just: ok")
     d1 = parse_json(r1.out)
     show_claude_result(d1) if d1 is not None else show("stdout", r1.out + r1.err)
     r2 = run(fx, "claude_resume_2",
              [CLAUDE, "-p", "--model", "haiku", "--safe-mode", "--resume", sid,
               "--output-format", "json"],
-             fx.wt_a, "What word did I ask you to remember? Reply with just the word.")
+             fx.seat_a, "What word did I ask you to remember? Reply with just the word.")
     d2 = parse_json(r2.out)
     show_claude_result(d2) if d2 is not None else show("stdout", r2.out + r2.err)
     show("requested session id", sid)
-    show("remembered", "pineapple" in r2.out.lower())
+    expect("claude_resume", "both calls exit 0", r1.code == 0 and r2.code == 0, f"{r1.code}, {r2.code}")
+    expect("claude_resume", "second call remembered the word",
+           "pineapple" in str(claude_final(d2).get("result", "")).lower())
 
 
 def codex_write(fx: Fixture) -> None:
@@ -371,24 +441,34 @@ def codex_write(fx: Fixture) -> None:
     )
     r = run(fx, "codex_write",
             [CODEX, "exec", *CODEX_PIN, *CODEX_LEAN, "--sandbox", "workspace-write",
-             "-C", str(fx.wt_a), "--ephemeral", "--color", "never", "--json",
+             "-C", str(fx.seat_a), "--ephemeral", "--color", "never", "--json",
              "--output-schema", str(schema_path), "-o", str(last), "-"],
-            fx.wt_a, prompt)
-    hello = fx.wt_a / "hello_codex.txt"
-    show("hello_codex.txt exists", hello.exists())
+            fx.seat_a, prompt)
+    case = "codex_write"
+    hello = fx.seat_a / "hello_codex.txt"
+    expect(case, "file written in its own clone", hello.exists())
     # The conductor must be able to commit and clean up what a seat wrote.
-    try:
-        show("this account can read what codex wrote", repr(hello.read_text(encoding="utf-8")))
-    except OSError as exc:
-        show("this account can read what codex wrote", f"NO: {exc}")
-    try:
-        hello.unlink()
-        show("this account can delete what codex wrote", True)
-    except OSError as exc:
-        show("this account can delete what codex wrote", f"NO: {exc}")
-    show("permissions on the seat's own folder", principals(fx.wt_a))
-    show("permissions on the other folder", principals(fx.wt_b))
-    show("last message file", last.read_text(encoding="utf-8") if last.exists() else "(missing)")
+    if hello.exists():
+        try:
+            text = hello.read_text(encoding="utf-8")
+            expect(case, "this account can read what codex wrote", text.strip() == "hi", repr(text))
+        except OSError as exc:
+            expect(case, "this account can read what codex wrote", False, str(exc))
+        try:
+            hello.unlink()
+            expect(case, "this account can delete what codex wrote", True)
+        except OSError as exc:
+            expect(case, "this account can delete what codex wrote", False, str(exc))
+    own, other = principals(fx.seat_a), principals(fx.seat_b)
+    show("permissions on the seat's own folder", own)
+    show("permissions on the other folder", other)
+    if os.name == "nt" and not os.environ.get("PARALLAX_SMOKE_NO_LOCK"):
+        expect(case, "other seat's folder has no sandbox entry", not sandbox_names(other), other)
+    answer = as_obj(last.read_text(encoding="utf-8")) if last.exists() else None
+    show("last message", answer if answer is not None else "(missing or not JSON)")
+    expect(case, "schema-shaped answer says created", bool(answer and answer.get("created") is True))
+    if answer:
+        show("python ran inside the sandbox (expected false on this machine)", answer.get("python_ran"))
     rows = jsonl(r.out)
     if rows:
         summarize_codex_stream(rows)
@@ -400,25 +480,28 @@ def codex_write(fx: Fixture) -> None:
 def codex_resume(fx: Fixture) -> str | None:
     r1 = run(fx, "codex_resume_1",
              [CODEX, "exec", *CODEX_PIN, *CODEX_LEAN, "--sandbox", "workspace-write",
-              "-C", str(fx.wt_a), "--color", "never", "--json", "-"],
-             fx.wt_a, "Remember this word: pineapple. Reply with just: ok")
+              "-C", str(fx.seat_a), "--color", "never", "--json", "-"],
+             fx.seat_a, "Remember this word: pineapple. Reply with just: ok")
     thread_id = summarize_codex_stream(jsonl(r1.out))
     show("thread id", str(thread_id))
-    if not thread_id:
+    if not expect("codex_resume", "first call reports a thread id", bool(thread_id)):
         show("stderr tail", r1.err[-600:])
         return None
     last = fx.out / "codex_resume.last.txt"
     r2 = run(fx, "codex_resume_2",
              [CODEX, "exec", "resume", *CODEX_PIN, *CODEX_LEAN,
               "-c", 'sandbox_mode="workspace-write"', "--json", "-o", str(last), thread_id, "-"],
-             fx.wt_a,
+             fx.seat_a,
              "What word did I ask you to remember? Reply with just the word. "
              "Also create a file named resumed.txt in the current directory containing: yes")
     resumed_thread = summarize_codex_stream(jsonl(r2.out))
     show("resumed thread id", str(resumed_thread))
-    show("last message", last.read_text(encoding="utf-8") if last.exists() else "(missing)")
-    show("resumed.txt exists in wt-a", (fx.wt_a / "resumed.txt").exists())
+    message = last.read_text(encoding="utf-8") if last.exists() else ""
+    show("last message", message or "(missing)")
     show("stderr tail", r2.err[-600:])
+    expect("codex_resume", "resumed call remembered the word", "pineapple" in message.lower())
+    expect("codex_resume", "resumed call can still write (sandbox_mode via -c)",
+           (fx.seat_a / "resumed.txt").exists())
     return thread_id
 
 
@@ -430,22 +513,26 @@ def together(fx: Fixture) -> None:
             fx, "together_claude",
             [CLAUDE, "-p", "--model", "haiku", "--safe-mode", "--no-session-persistence",
              "--output-format", "json"],
-            fx.wt_a, "Reply with just: ok")
+            fx.seat_a, "Reply with just: ok")
 
     def codex() -> None:
         results["codex"] = run(
             fx, "together_codex",
             [CODEX, "exec", *CODEX_PIN, *CODEX_LEAN, "--sandbox", "read-only",
-             "-C", str(fx.wt_b), "--ephemeral", "--color", "never", "--json", "-"],
-            fx.wt_b, "Reply with just: ok")
+             "-C", str(fx.seat_b), "--ephemeral", "--color", "never", "--json", "-"],
+            fx.seat_b, "Reply with just: ok")
 
     threads = [threading.Thread(target=claude), threading.Thread(target=codex)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
-    for name, r in results.items():
-        show(f"{name} exit / seconds", f"{r.code} / {r.secs:.0f}")
+    for name in ("claude", "codex"):
+        r = results.get(name)
+        expect("together", f"{name} exit 0 while the other ran",
+               r is not None and r.code == 0, "no result" if r is None else f"exit {r.code}")
+        if r is not None:
+            show(f"{name} seconds", f"{r.secs:.0f}")
 
 
 def claude_auth(fx: Fixture) -> None:
@@ -460,6 +547,9 @@ def claude_auth(fx: Fixture) -> None:
                 "loggedIn", "authMethod", "apiProvider", "subscriptionType", "tokenSource")})
         else:
             show(label, f"exit {done.returncode}: {done.stdout[:200]} {done.stderr[:200]}")
+        if label == "scrubbed env":   # what a seat actually sees
+            expect("claude_auth", "signed in with the seat's environment",
+                   isinstance(doc, dict) and doc.get("loggedIn") is True)
 
 
 def codex_env(fx: Fixture) -> None:
@@ -484,14 +574,17 @@ def codex_env(fx: Fixture) -> None:
     }
     for label, flags in variants.items():
         r = run(fx, f"codex_env_{label}",
-                [CODEX, "exec", *CODEX_PIN, *flags, "-C", str(fx.wt_a), "--ephemeral",
+                [CODEX, "exec", *CODEX_PIN, *flags, "-C", str(fx.seat_a), "--ephemeral",
                  "--color", "never", "--json", "-"],
-                fx.wt_a, prompt)
+                fx.seat_a, prompt)
+        exits = []
         for row in jsonl(r.out):
             item = row.get("item") or {}
             if row.get("type") == "item.completed" and item.get("type") == "command_execution":
+                exits.append(item.get("exit_code"))
                 show("exit", item.get("exit_code"))
                 show("output", str(item.get("aggregated_output")), width=1400)
+        expect("codex_env", f"{label}: a sandboxed command ran", 0 in exits, exits)
         if r.err.strip():
             show("stderr tail", r.err[-300:])
 
@@ -593,21 +686,35 @@ def codex_acl(fx: Fixture) -> None:
                 show("command exit / output", f"{item.get('exit_code')} / {str(item.get('aggregated_output'))[:90]}")
         made = own / "made_by_shell.txt"
         show("made_by_shell.txt exists", made.exists())
+        readable = deleted = False
         if made.exists():
             try:
                 show("this account can read it", repr(made.read_text(encoding="utf-8")))
+                readable = True
             except OSError as exc:
                 show("this account can read it", f"NO: {exc}")
             try:
                 made.unlink()
                 show("this account can delete it", True)
+                deleted = True
             except OSError as exc:
                 show("this account can delete it", f"NO: {exc}")
         # Isolation, judged without a model: Codex adds its sandbox entries to the
         # folder it works in. A sibling that lists only this account, SYSTEM and
         # Administrators has no entry the sandbox user could use.
-        show("permissions on the seat's own folder", principals(own))
-        show("permissions on the other folder", principals(other))
+        own_names, other_names = principals(own), principals(other)
+        show("permissions on the seat's own folder", own_names)
+        show("permissions on the other folder", other_names)
+        # Only the arrangement the design uses has fixed expectations; the
+        # other variants exist to reproduce the findings above.
+        if variant == default.replace(":", "_"):
+            answer = as_obj(last.read_text(encoding="utf-8")) if last.exists() else None
+            expect("codex_acl", "sandboxed commands start", bool(answer and answer.get("wrote") is True),
+                   answer or "(no answer)")
+            expect("codex_acl", "this account can read and delete what the sandbox wrote",
+                   readable and deleted)
+            expect("codex_acl", "other folder has no sandbox entry", not sandbox_names(other_names),
+                   other_names)
 
 
 def principals(path: Path) -> list[str]:
@@ -684,16 +791,20 @@ def main() -> int:
                 codex_thread = value
         except Exception as exc:  # keep going: one broken case must not hide the rest
             print(f"  CASE CRASHED: {type(exc).__name__}: {exc}")
+            FAILURES.append(f"{name}: crashed: {type(exc).__name__}: {exc}")
     print("\n=== cleanup ===")
     if codex_thread:
         done = subprocess.run([CODEX, "delete", "--force", codex_thread],
                               capture_output=True, text=True)
         show("codex delete", f"exit {done.returncode} {done.stdout.strip()} {done.stderr.strip()}")
     if "claude_resume" in wanted:
-        done = subprocess.run([CLAUDE, "purge", "-y", str(fx.wt_a)], capture_output=True, text=True)
+        done = subprocess.run([CLAUDE, "purge", "-y", str(fx.seat_a)], capture_output=True, text=True)
         show("claude purge", f"exit {done.returncode} {done.stdout.strip()} {done.stderr.strip()}")
     print(f"\nraw output kept in: {fx.out}")
-    return 0
+    print(f"\n=== {len(FAILURES)} failed expectation(s) ===")
+    for failure in FAILURES:
+        print(f"  {failure}")
+    return 1 if FAILURES else 0
 
 
 if __name__ == "__main__":

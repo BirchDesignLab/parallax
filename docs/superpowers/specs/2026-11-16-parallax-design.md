@@ -95,7 +95,7 @@ Ways this could run and still be a failure:
 The blind is enforced where each CLI can enforce it and audited everywhere. Seats are treated as fallible, not hostile, and no receipt claims more than that.
 
 - **Placement.** Each seat's worktree is a separate clone of the project with no git link to the other seat's. It sits under a random name in a state folder in the human's home folder (`~/.parallax` by default), outside the repo. A seat is told only its own path. Nothing a seat produces enters the project's own repo until the task lands. The state folder must not be under `%LOCALAPPDATA%` or `%APPDATA%`: a process started from a packaged app (Claude's desktop app is one) has new folders there silently redirected, and Codex's sandbox then cannot find them.
-- **Confinement.** Each task's folder in the state folder is made private before anything is put in it: its permissions name only the human's account, SYSTEM and Administrators, and everything inside inherits that. Codex runs in its `workspace-write` sandbox, which on this machine runs commands as a separate Windows user. Codex adds entries for that user to the one clone it works in and to nothing else, so the other seat's clone, the scratch clones and the artifacts stay closed to it. A sandboxed read of a private sibling folder was refused ("Access is denied") in `%TEMP%`. Claude gets file tools restricted to its own worktree and no shell at all. Those flags are accepted, but their effect is not yet verified because the Claude CLI is not signed in.
+- **Confinement.** Each task's folder in the state folder is made private before anything is put in it: its permissions name only the human's account, SYSTEM and Administrators, and everything inside inherits that. Codex runs in its `workspace-write` sandbox, which on this machine runs commands as a separate Windows user. Codex adds entries for that user to the one clone it works in and to nothing else, so the other seat's clone, the scratch clones and the artifacts stay closed to it. A sandboxed read of a private sibling folder was refused ("Access is denied"), in `%TEMP%` and under the home folder. Claude gets file tools restricted to its own worktree and no shell at all. Under `--restricted` a read outside its folder is refused and reported in the event stream (verified 2026-11-17).
 - **Seal.** Readings and attempts are hashed into the ledger before reveal, so nothing can be adjusted afterwards.
 - **Audit.** Both CLIs emit an event stream of what a seat did. After each attempt the conductor scans it for any path belonging to the other seat or to the state folder. This is the second line of defense and it is best effort: a script that reads another worktree without naming it would get past.
 - **Voiding.** A hit voids the attempt, and the contamination goes with it: the session, the worktree and everything the attempt produced are discarded. The rerun is a new session in a new worktree, starting from the contract alone.
@@ -251,15 +251,18 @@ Verified by `scripts/probes/seat_smoke.py` on 2026-11-16:
 - Codex's event stream: `thread.started` carries the session id; `item.completed` of type `command_execution` carries each command with its output and exit code; `turn.completed` carries token usage.
 - Inside the Codex sandbox `python`, `py` and `uv` do not resolve, though `git` and `node` do. They are installed under the human's profile.
 - Claude accepts `--safe-mode --restricted --tools ... --permission-mode acceptEdits --permission-prompts none --output-format stream-json --verbose` together. The stream opens with a `system/init` event listing the tools and ends with a `result` event carrying `is_error`, `result`, `session_id` and `usage`.
-- The standalone Claude CLI is not signed in: `claude auth status` reports `loggedIn: false`. A `claude -p` call returns exit code 1 and a `result` event with `is_error: true`.
+- On 2026-11-16 the standalone Claude CLI was not signed in, so nothing past those flags could be checked that day. See 2026-11-17 below.
+Verified by `scripts/probes/seat_smoke.py` on 2026-11-17, after the human signed the Claude CLI in, with the fixture laid out as the design lays out a task (one private task folder under the home folder holding the repo and one separate clone per seat). Every case passed and the probe exited 0:
 
-Not yet verified. All but the last need the human to run `claude auth login` first:
+- `claude auth status` reports `loggedIn: true` with the seat's scrubbed environment, so a seat needs no inherited host variables.
+- `--json-schema` works: the result event carries the answer as an object under `structured_output`, and the same answer as a JSON string in `result`.
+- `--restricted` confines the file tools to the working directory. A `Read` of the other seat's clone was refused; the stream carries a `system/permission_denied` event with `decision_reason` "--restricted: path outside the working directory" and the path in `message`, and the result event lists it under `permission_denials`. The tool result back to the model has `is_error: true`. The canary in that file never appeared. `--tools Read,Write,Edit,Glob,Grep` leaves no shell; a `Bash` call fails with "No such tool available".
+- `--session-id <uuid>` then `--resume <uuid>` continues a session headless; the second call remembered a word from the first.
+- Claude and Codex ran at the same moment without trouble.
+- A sandboxed Codex command's `Test-Path` on the other seat's file, under the home folder, failed with "Access is denied". The other clone's permissions list no sandbox entry; Codex added `CodexSandboxUsers` and a per-run SID to its own clone only.
+- Cost note: a fresh `fable` call spends about 24k cache-creation tokens on Claude Code's own system prompt before the brief (about $0.49 for a one-word answer); `haiku` spends the same tokens for under a cent. Briefs should be few and full rather than many and small.
 
-- Claude's structured output with `--json-schema`, and the key it arrives under.
-- Claude refusing reads outside its folder under `--restricted`.
-- Claude resuming a session headless.
-- Claude and Codex running at the same moment. Codex's side passed.
-- A sandboxed read of a private sibling folder under the home folder being refused. Its permissions say it will be (they list no sandbox entry), and the same permissions were refused in `%TEMP%`, but the attempt itself was not repeated there. A model-free test needs `codex sandbox`, which requires a `[permissions]` profile that has not been worked out.
+Not yet verified: nothing the design relies on. Rerun the probe when either CLI updates; it exits non-zero if any expectation fails.
 
 ## Left to the builder
 
