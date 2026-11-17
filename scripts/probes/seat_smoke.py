@@ -155,7 +155,7 @@ def make_fixture() -> Fixture:
     seat_a = root / "seat-a"
     seat_b = root / "seat-b"
     for seat in (seat_a, seat_b):
-        subprocess.run(["git", "clone", "--quiet", "-c", "core.autocrlf=false", str(repo), str(seat)],
+        subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", "-c", "core.autocrlf=false", str(repo), str(seat)],
                        check=True, capture_output=True, text=True)
         git(seat, "remote", "remove", "origin")   # a seat's clone must not point back at the repo
     canary = "CANARY-" + uuid.uuid4().hex[:12]
@@ -654,7 +654,7 @@ def codex_acl(fx: Fixture) -> None:
         if kind == "worktree":
             git(fx.repo, "worktree", "add", "-b", "acl-" + uuid.uuid4().hex[:6], str(own))
         else:
-            subprocess.run(["git", "clone", "--quiet", "-c", "core.autocrlf=false", str(fx.repo), str(own)],
+            subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", "-c", "core.autocrlf=false", str(fx.repo), str(own)],
                            check=True, capture_output=True, text=True)
             git(own, "remote", "remove", "origin")
         other = base / (parent.name + "-other")
