@@ -1,3 +1,5 @@
 __pycache__/
 *.egg-info/
 .parallax/run/
+# Working scratch for agents and test runs; reusable records go in docs/ and scripts/
+/.superpowers/

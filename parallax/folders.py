@@ -16,7 +16,7 @@ import functools
 import os
 import re
 import subprocess
-import tempfile
+import uuid
 from pathlib import Path
 
 SYSTEM_SID = "S-1-5-18"
@@ -77,10 +77,14 @@ def is_private(path: Path) -> bool:
 
 def _dacl(path: Path) -> str | None:
     """The folder's DACL in SDDL, read with `icacls /save` so it does not depend on the display language."""
-    with tempfile.TemporaryDirectory(prefix="plx acl ") as tmp:
-        saved = Path(tmp) / "acl.txt"
+    # Saved beside the folder, not in %TEMP%: Parallax keeps every file it writes in the
+    # project or the state home.
+    saved = path.parent / f".{path.name}.acl-{uuid.uuid4().hex[:8]}.txt"
+    try:
         _run(["icacls", str(path), "/save", str(saved)])
         text = saved.read_bytes().decode("utf-16-le", errors="replace").lstrip("﻿")
+    finally:
+        saved.unlink(missing_ok=True)
     lines = [line for line in text.splitlines() if line.strip()]
     if len(lines) < 2:
         return None

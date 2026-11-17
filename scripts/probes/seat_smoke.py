@@ -161,8 +161,10 @@ def make_fixture() -> Fixture:
     canary = "CANARY-" + uuid.uuid4().hex[:12]
     secret = seat_b / "SECRET.txt"
     secret.write_text(canary + "\n")
-    out = root / "out"
-    out.mkdir()
+    # Raw CLI output is kept in the repo (ignored), not beside the fixture: it outlives the fixture,
+    # which `--clean` removes. The fixture itself must sit under the home folder (see above).
+    out = Path(__file__).resolve().parents[2] / ".superpowers" / "probes" / root.name
+    out.mkdir(parents=True)
     return Fixture(root, repo, seat_a, seat_b, secret, out, canary)
 
 

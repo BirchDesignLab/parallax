@@ -1,0 +1,40 @@
+# Parallax
+
+A Python conductor that pairs two agent CLIs on one task: one builds, the other writes probes blind, and the result lands on main with a receipt. Spec: `docs/superpowers/specs/2026-11-16-parallax-design.md`. Build plan: `docs/superpowers/plans/2026-11-16-parallax-v0.md` (tick its checkboxes as tasks land).
+
+## Where files go
+
+Developer direction 2026-11-17, after parallel agents collided in shared temp folders and one wiped %TEMP%.
+
+**Never write to %TEMP%, a session scratchpad, or any temp directory.** Everything stays in this repo:
+
+| What | Home |
+|---|---|
+| Anything reusable: briefs, handoffs, decisions, findings | `docs/` (committed) |
+| Scripts of any kind, including one-off probes and checks | `scripts/` in a subfolder (`scripts/probes/`), committed |
+| Working scratch: command output dumps, agent working files, test-run folders, probe raw output | `.superpowers/` (ignored). Promote anything later work depends on into `docs/` first |
+
+Each agent in a parallel fan-out writes scratch only under its own `.superpowers/agents/<label>/`. Tests need nothing special: `tests/__init__.py` points `tempfile` and `PARALLAX_HOME` at a per-run folder under `.superpowers/tmp/tests/` and removes it afterwards.
+
+The one exception is by design, not scratch: Parallax's runtime state home is `~/.parallax` (spec, "Keeping the blind honest"), and `scripts/probes/` fixtures that test that layout live in `~/.parallax-probe`.
+
+**Deleting:** never run a recursive delete (`shutil.rmtree`, `remove_tree`, `rm -rf`, `Remove-Item -Recurse`) on a path computed by walking up parents. Delete only a folder you created, after asserting its name prefix and its parent. Every brief and subagent prompt repeats this rule.
+
+## Delegation
+
+Work runs in rounds of plan tasks that do not depend on each other, with disjoint file ownership (no worktrees).
+
+- **Codex:** the developer pastes briefs written to `docs/briefs/codex-task-<n>.md` into their Codex app. Recommend `gpt-6-astra` at `high` (developer ruling: design-grade Codex work is astra high or xhigh).
+- **Claude subagents:** set `model` **and** `effort` on every dispatch; an unset agent inherits the session's model and effort, which is the expensive default. Fable is never a subagent model.
+  - Sonnet 5.5 `medium`: one fully specified plan task with its tests.
+  - Sonnet 5.5 `high`: a task heavy on Windows behavior or needing judgment across files.
+  - Opus 5.5 `medium`: review or synthesis when the controller asks for a second read.
+  - Haiku 5.5: listing, grepping, extracting.
+- Every brief names the exact files the agent may create, forbids state-changing git, asks for exact test output and a list of choices the plan did not dictate, and carries the scratch and delete rules above.
+- **The controller (the main Claude session)** reviews every task's code, fixes what it finds, ticks the plan, and makes one commit per task. Nobody else runs state-changing git.
+
+## Working rules
+
+- Python 3.12, standard library only. Tests: `python -m unittest discover -s tests -t . -v`.
+- Local only: no remotes, no push.
+- After either CLI updates, rerun `python scripts/probes/seat_smoke.py` (exits non-zero on any failed expectation) and `python scripts/probes/job_object_seats.py`.
