@@ -6,9 +6,11 @@ pause for a ruling or a blocked seat all resume by running the same task file ag
 
 Part 1: lock, open, sealed readings, reveal, settlement, rulings, contract.
 Part 2: braid (parallel attempts), crossing, landing.
+Part 3: disputes after a failed crossing, repairs, rulings' follow-ups, limits, drop, chores.
 """
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
@@ -203,7 +205,16 @@ class Conductor:
         if any(e["type"] == "ruling.made" and e.get("dispute") == dispute_id for e in events):
             raise ValueError(f"{dispute_id} is already ruled")
         dispute = Dispute.from_event(opened[-1])
-        text = decisions.ruling_text(dispute, choice, note)
+        if dispute.kind in ("check", "unresolved") and choice in ("a", "b"):
+            text = note.strip() or f"{dispute.a_label if choice == 'a' else dispute.b_label} is right."
+        elif dispute.kind == "unresolved" and choice == "drop":
+            text = note.strip() or "Drop this task."
+        else:
+            text = decisions.ruling_text(dispute, choice, note)
+        if dispute.kind == "mutant" and choice == "b":
+            mutant = self._mutant_of(events).get(dispute_id, "?")
+            waiver = f"mutant {mutant} waived" + (f": {note.strip()}" if note.strip() else "")
+            limitation = f"{waiver}; {limitation}" if limitation.strip() else waiver
         if dispute.kind in ("mutant", "unresolved"):
             scope = "task"
         elif scope is None:
@@ -257,7 +268,7 @@ class Conductor:
                 return Outcome("landed", task, f"{task} has already landed")
         t = self._open(task, text, builder)
         if t.kind == "chore":
-            raise NotImplementedError("solo")
+            return self._solo(t)
         self._readings(t)
         self._reveal(t)
         self._settle(t)
@@ -266,14 +277,17 @@ class Conductor:
         if stop_after == "contract":
             return Outcome("stopped", t.id, "stopped after the contract was frozen")
         self._braid(t)
-        done = self._crossing(t)
-        if not done["passed"] or any(state != "killed" for state in done["mutants"].values()):
-            return self._after_failed_crossing(t, done)
-        return self._land(t)
-
-    def _after_failed_crossing(self, t: _Task, done: dict) -> Outcome:
-        """Task 11 replaces this with the dispute loop."""
-        return Outcome("blocked", t.id, detail="crossing failed")
+        recross = False
+        while True:
+            # Each pass either lands, stops for the human, or records a new failed crossing,
+            # and failed crossings are bounded by the repair limit, so this ends.
+            done = self._crossing(t, force=recross)
+            if self._clean(t, done):
+                return self._land(t)
+            outcome = self._after_failed_crossing(t, done)
+            if outcome is not None:
+                return outcome
+            recross = True
 
     # Step 1
     def _lock(self, task: str) -> Path | Outcome:
@@ -325,7 +339,7 @@ class Conductor:
                 raise ValueError(f"no seat named {seat!r} was given to the conductor")
         if not t.dir.exists():
             folders.make_private(t.dir)
-        for seat in t.seats:
+        for seat in (t.seats if t.kind == "behavior" else (t.builder,)):
             if self._clone_of(t, seat) is None:
                 self._new_clone(t, seat)
         return t
@@ -405,6 +419,11 @@ class Conductor:
     def _contract(self, t: _Task) -> None:
         if self._first(t.id, "contract.frozen") is not None:
             return
+        interface, points = self._contract_points(t)
+        self._freeze(t, 1, interface, points)
+
+    def _contract_points(self, t: _Task) -> tuple[str, list[Point]]:
+        """The interface and decisions of contract v1: agreed points, then the ruled readings."""
         readings = {seat: self._reading(t, seat) for seat in t.seats}
         reveals = {seat: self._stored(t, seat, "reveal", self._last(t.id, "reveal.done", seat=seat)["sha"])
                    for seat in t.seats}
@@ -418,12 +437,15 @@ class Conductor:
                 points.append(Point(dispute.question, ruling["text"], f"ruled {dispute.id}"))
             elif dispute.kind == "interface" and ruling["choice"] in ("b", "other"):
                 interface = f"{interface}\nAmended: {ruling['text']}"
+        return interface, points
+
+    def _freeze(self, t: _Task, version: int, interface: str, points: Sequence[Point]) -> None:
         # This task's own rulings are already decisions in the contract.
         in_force = [p for p in decisions.precedents(self.events()) if p["task"] != t.id]
-        text = decisions.render_contract(t.id, 1, t.text, interface, points, in_force)
-        self._write(self._run_dir(t) / "contract-v1.md", text)
-        self.journal.append("contract.frozen", t.id, version=1, sha=sha256_text(text))
-        self.say(f"{t.id}: contract v1 frozen")
+        text = decisions.render_contract(t.id, version, t.text, interface, points, in_force)
+        self._write(self._run_dir(t) / f"contract-v{version}.md", text)
+        self.journal.append("contract.frozen", t.id, version=version, sha=sha256_text(text))
+        self.say(f"{t.id}: contract v{version} frozen")
 
     # Step 8
     def _braid(self, t: _Task) -> None:
@@ -487,17 +509,17 @@ class Conductor:
                             session=result.session, mutants=list(mutants or []), usage=usage)
         self.say(f"{t.id}: {seat}'s {stage} {n} finished")
 
-    def _validate(self, t: _Task, seat: str, clone: Path, mutants: list[dict] | None, message: str) -> list[str]:
+    def _validate(self, t: _Task, seat: str, clone: Path, mutants: list[dict] | None, message: str,
+                  scope: Sequence[str] | None = None) -> list[str]:
         """Check a seat's work in its clone; when it passes, move mutants out and snapshot it.
 
         `mutants` is the builder's list to validate, or None when there are none to check
         (the challenger). Returns the reasons for rejecting the work; empty means it is
         committed in the clone.
         """
-        role = t.role(seat)
-        scope = self.cfg.builder_scope if role == "builder" else self.cfg.challenger_scope
-        changed = [p for p in gitops.changed_paths(clone)
-                   if not p.startswith((f"{MUTANTS_DIR}/", f"{SCRATCH_DIR}/"))]
+        if scope is None:
+            scope = self.cfg.builder_scope if t.role(seat) == "builder" else self.cfg.challenger_scope
+        changed = self._changed(clone)
         reasons = []
         outside = scopes.outside(changed, scope)
         if outside:
@@ -538,11 +560,15 @@ class Conductor:
             shutil.copytree(t.dir / "mutants" / mutant["id"], clone / MUTANTS_DIR / mutant["id"], dirs_exist_ok=True)
 
     # Step 9
-    def _crossing(self, t: _Task) -> dict:
-        """Cross the seats' latest commits, unless the last crossing already did exactly that."""
+    def _crossing(self, t: _Task, force: bool = False) -> dict:
+        """Cross the seats' latest commits, unless the last crossing already did exactly that.
+
+        `force` crosses again even then: a ruling's repair that changed nothing still costs a
+        crossing, so the repair limit, and then the human, ends a loop that makes no progress.
+        """
         builder, challenger = self._head(t, t.builder), self._head(t, t.challenger)
         last = self._last(t.id, "crossing.done")
-        if last is not None and (last["builder"], last["challenger"]) == (builder, challenger):
+        if not force and last is not None and (last["builder"], last["challenger"]) == (builder, challenger):
             return last
         n = 1 + sum(1 for e in self.events(t.id) if e["type"] == "crossing.done")
         work = t.dir / "cross"
@@ -561,17 +587,338 @@ class Conductor:
             raise _Stop(Outcome("blocked", t.id, f"crossing {n}: the probes do not apply on the build: "
                                                  f"{scrub_paths(str(exc))}")) from None
         self._write(self._run_dir(t) / "crossings" / str(n) / "check.txt", result.output)
+        evidence, mutant_of = self._reserve_evidence(t, result)
         done = self.journal.append("crossing.done", t.id, n=n, passed=result.passed, timed_out=result.timed_out,
                                    count=result.count, mutants=result.mutants, builder=builder,
-                                   challenger=challenger, evidence=self._reserve_evidence(t, result))
+                                   challenger=challenger, evidence=evidence, mutant_of=mutant_of)
         caught = sum(1 for s in result.mutants.values() if s == "killed")
         self.say(f"{t.id}: crossing {n}: check {'passed' if result.passed else 'failed'}"
                  + (f", {caught} of {len(result.mutants)} mutants caught" if result.passed else ""))
         return done
 
-    def _reserve_evidence(self, t: _Task, result) -> list[str]:
-        """Dispute ids reserved for this crossing's failures. Task 11 fills this in."""
-        return []
+    def _reserve_evidence(self, t: _Task, result) -> tuple[list[str], dict[str, str]]:
+        """Reserve dispute ids for this crossing's failures: one for a failed check, else one per
+        unwaived surviving mutant. Returns (ids, {id: mutant id}) for the mutant ones."""
+        start = self._next_dispute_number(t)
+        if not result.passed:
+            return [f"D-{t.id}-{start}"], {}
+        waived = self._waived(t)
+        survivors = [mid for mid, state in result.mutants.items() if state != "killed" and mid not in waived]
+        ids = [f"D-{t.id}-{start + i}" for i in range(len(survivors))]
+        return ids, dict(zip(ids, survivors))
+
+    # After a crossing that is not clean
+    def _after_failed_crossing(self, t: _Task, done: dict) -> Outcome | None:
+        """Decide what follows failed crossing `done`. None means: cross again.
+
+        In order, each part skipping itself when its events are already there:
+        1. a pending dispute stops the run for the human;
+        2. disputes opened after this crossing are all ruled: carry the rulings out (drop the
+           task; amend the contract; the losing side repairs), then cross again;
+        3. the repair rounds are used up: open an `unresolved` dispute;
+        4. the answering seats respond to the evidence; if one conceded, cross again;
+        5. nobody conceded: open a dispute per evidence item for the human.
+        """
+        events = self.events(t.id)
+        self._rulings(t)                                                    # 1
+        at = next(i for i, e in enumerate(events) if e["type"] == "crossing.done" and e["n"] == done["n"])
+        tied = [Dispute.from_event(e) for e in events[at + 1:] if e["type"] == "dispute.opened"]
+        if tied:                                                            # 2
+            rulings = {e["dispute"]: e for e in events if e["type"] == "ruling.made"}
+            drop = [d for d in tied if rulings[d.id]["choice"] == "drop"]
+            if drop:
+                return self._drop(t, rulings[drop[0].id])
+            self._amend_contract(t)
+            self._repairs(t, done, tied, rulings)
+            return None
+        failed = sum(1 for e in events if e["type"] == "crossing.done" and not self._clean(t, e))
+        extra = sum(1 for e in events if e["type"] == "ruling.made" and e["kind"] == "unresolved")
+        if failed >= 1 + self.cfg.max_repair_rounds + extra:               # 3
+            output = self._check_output(t, done["n"])
+            self._open_dispute(t, Dispute(
+                f"D-{t.id}-{self._next_dispute_number(t)}", "unresolved",
+                f"The check still fails after {done['n']} crossings. Who must change?",
+                "The probes are wrong.", "The code is wrong.", *self._labels(t), _tail(output, 4000)))
+            self._rulings(t)
+        items = self._evidence_items(t, done)
+        answering = list(t.seats) if not done["passed"] else [t.challenger]
+        todo = [s for s in answering if self._response(t, done["n"], s, ()) is None]
+        self._parallel([lambda s=s: self._respond(t, s, done, items) for s in todo])   # 4
+        responses = {s: self._response(t, done["n"], s, ()) for s in answering}
+        if any(self._conceded(t, done, s, r) for s, r in responses.items()):
+            return None
+        for item in items:                                                  # 5
+            self._open_dispute(t, self._evidence_dispute(t, item, responses))
+        self._rulings(t)
+        raise AssertionError("unreachable: disputes were just opened")
+
+    def _respond(self, t: _Task, seat: str, done: dict, items: Sequence[dict], ruling: str = "",
+                 ruled: Sequence[str] = ()) -> None:
+        """One respond call (with audit, validation and retry as for an attempt), then `response.done`."""
+        role, n = t.role(seat), done["n"]
+        clone = self._clone_of(t, seat)
+        # Every accepted change is committed, so anything else in the clone is left from a crash.
+        gitops.git(clone, "reset", "--quiet", "--hard")
+        gitops.git(clone, "clean", "-fdxq")
+        before = gitops.rev(clone)
+        contract, _, _ = self._contract_text(t)
+        brief = briefs.respond(role, contract, items, self.cfg, ruling=ruling)
+        request = SeatRequest("respond", brief, clone, schemas.RESPOND, writable=True,
+                              session=self._session(t, seat), out_dir=self._artifact_dir(t, seat, "respond"))
+        voids = []
+
+        def void(request: SeatRequest, result: SeatResult, hits: list[str]) -> SeatRequest:
+            # As for an attempt, but the fresh clone starts at the seat's own last accepted commit.
+            self.journal.append("attempt.voided", t.id, n=n, role=role, seat=seat, hits=hits, stage="respond")
+            session = result.session or request.session
+            if session:
+                self.seats[seat].discard(session, request.cwd)
+            fresh = self._new_clone(t, seat)
+            gitops.fetch(fresh, request.cwd, before)
+            gitops.git(fresh, "checkout", "--quiet", "--detach", before)
+            self._remove_clone(t, seat, request.cwd)
+            voids.append(hits)
+            if len(voids) >= 2:
+                raise _Stop(Outcome("blocked", t.id, f"{seat}'s respond was voided twice: it named {', '.join(hits)}"))
+            return replace(request, brief=brief, cwd=fresh, session=None, out_dir=self._artifact_dir(t, seat, "respond"))
+
+        result, request = self._call(seat, request, task=t, void=void)
+        usage = dict(result.usage)
+        rejections = 0
+        while True:
+            output = result.output
+            if output["blocked"].strip():
+                raise _Stop(Outcome("blocked", t.id, f"{seat} is blocked at respond: {output['blocked']}"))
+            clone = request.cwd
+            if not any(a["stance"] == "concede" for a in output["answers"]) and self._changed(clone, all_files=True):
+                # A seat that contests every dispute may not change anything.
+                gitops.git(clone, "reset", "--quiet", "--hard")
+                gitops.git(clone, "clean", "-fdq")
+            changed = bool(self._changed(clone))
+            mutants = output["mutants"] if role == "builder" and changed else None
+            reasons = self._validate(t, seat, clone, mutants, f"{t.id} {role} respond {n}")
+            if not reasons:
+                break
+            reason = "; ".join(reasons)
+            self.journal.append("attempt.rejected", t.id, n=n, role=role, seat=seat, reason=reason, stage="respond")
+            rejections += 1
+            if rejections >= 2:
+                raise _Stop(Outcome("blocked", t.id, f"{seat}'s respond was rejected twice: {reason}"))
+            retry = SeatRequest("respond", briefs.retry(reason), clone, schemas.RESPOND, writable=True,
+                                session=result.session, out_dir=self._artifact_dir(t, seat, "respond"))
+            result, request = self._call(seat, retry, task=t, void=void)
+            usage = _add_usage(usage, result.usage)
+        self.journal.append("response.done", t.id, round=n, seat=seat, answers=output["answers"],
+                            commit=gitops.rev(request.cwd), usage=usage, mutants=list(mutants or []),
+                            session=result.session, ruling=list(ruled))
+        self.say(f"{t.id}: {seat} responded to crossing {n}")
+
+    def _response(self, t: _Task, n: int, seat: str, ruled: Sequence[str]) -> dict | None:
+        return self._last(t.id, "response.done", round=n, seat=seat, ruling=list(ruled))
+
+    def _conceded(self, t: _Task, done: dict, seat: str, response: dict) -> bool:
+        """Answered concede to a dispute and actually changed something."""
+        head = done["builder"] if seat == t.builder else done["challenger"]
+        return any(a["stance"] == "concede" for a in response["answers"]) and response["commit"] != head
+
+    def _repairs(self, t: _Task, done: dict, tied: Sequence[Dispute], rulings: Mapping[str, dict]) -> None:
+        """The losing side of each ruled dispute repairs, with the ruling in its brief."""
+        items = {item["id"]: item for item in self._evidence_items(t, done)}
+        work: dict[str, list[tuple[Dispute, dict]]] = {}
+        for dispute in tied:
+            ruling = rulings[dispute.id]
+            if dispute.kind == "mutant" and ruling["choice"] == "b":
+                continue                                            # waived: nothing to repair
+            seat = t.challenger if ruling["choice"] == "a" else t.builder
+            work.setdefault(seat, []).append((dispute, ruling))
+        calls = []
+        for seat, pairs in work.items():
+            ruled = [d.id for d, _ in pairs]
+            if self._response(t, done["n"], seat, ruled) is not None:
+                continue
+            evidence = [items.get(d.id) or {"id": d.id, "kind": "check", "text": d.evidence} for d, _ in pairs]
+            text = "\n\n".join(r["text"] for _, r in pairs)
+            calls.append(lambda seat=seat, evidence=evidence, text=text, ruled=ruled:
+                         self._respond(t, seat, done, evidence, ruling=text, ruled=ruled))
+        self._parallel(calls)
+
+    def _amend_contract(self, t: _Task) -> None:
+        """Freeze the next contract version when a ruling since the last one amends it."""
+        events = self.events(t.id)
+        frozen = [i for i, e in enumerate(events) if e["type"] == "contract.frozen"]
+        if not any(self._amendment(e) for e in events[frozen[-1] + 1:]):
+            return
+        interface, points = self._contract_points(t)
+        for e in events[frozen[0] + 1:]:
+            points.extend(self._amendment(e))
+        self._freeze(t, events[frozen[-1]]["version"] + 1, interface, points)
+
+    @staticmethod
+    def _amendment(event: dict) -> list[Point]:
+        """What a ruling made after contract v1 adds to the contract: a check ruling's answer,
+        and any limitation (what is no longer promised)."""
+        if event["type"] != "ruling.made":
+            return []
+        points = []
+        if event["kind"] == "check":
+            points.append(Point(event["question"], event["text"], f"ruled {event['dispute']}"))
+        if event.get("limitation"):
+            points.append(Point("What is no longer promised?", event["limitation"], f"ruled {event['dispute']}"))
+        return points
+
+    def _drop(self, t: _Task, ruling: dict) -> Outcome:
+        """Land only the record of the task: its ledger events and the precedents."""
+        if self._ended_on_main(t, "task.dropped"):
+            self._finish(t, f"parallax/ready/{t.id}")
+            return Outcome("dropped", t.id, f"{t.id} was dropped")
+        if self._last(t.id, "task.dropped") is None:
+            self.journal.append("task.dropped", t.id, reason=ruling["text"])
+        return self._integrate(t, [], {}, f"{t.id}: dropped", status="dropped")
+
+    # Chores
+    def _solo(self, t: _Task) -> Outcome:
+        """A chore: one builder call, validated with scope ** and lint, then the check once."""
+        seat = t.builder
+        if self._last(t.id, "attempt.finished", role="builder") is None:
+            clone = self._clone_of(t, seat)
+            if self._last(t.id, "attempt.started", n=1, role="builder") is not None:
+                gitops.git(clone, "reset", "--quiet", "--hard")
+                gitops.git(clone, "clean", "-fdxq")
+            self.journal.append("attempt.started", t.id, n=1, role="builder", seat=seat)
+            request = SeatRequest("solo", briefs.solo(t.text, self.cfg), clone, schemas.SOLO, writable=True,
+                                  session=None, out_dir=self._artifact_dir(t, seat, "solo"))
+            result, request = self._call(seat, request, task=t)
+            usage, rejections = dict(result.usage), 0
+            while True:
+                if result.output["blocked"].strip():
+                    raise _Stop(Outcome("blocked", t.id, f"{seat} is blocked at solo: {result.output['blocked']}"))
+                reasons = self._validate(t, seat, request.cwd, None, f"{t.id} solo", scope=("**",))
+                if not reasons:
+                    break
+                reason = "; ".join(reasons)
+                self.journal.append("attempt.rejected", t.id, n=1, role="builder", seat=seat, reason=reason)
+                rejections += 1
+                if rejections >= 2:
+                    raise _Stop(Outcome("blocked", t.id, f"{seat}'s solo was rejected twice: {reason}"))
+                retry = SeatRequest("solo", briefs.retry(reason), request.cwd, schemas.SOLO, writable=True,
+                                    session=result.session, out_dir=self._artifact_dir(t, seat, "solo"))
+                result, request = self._call(seat, retry, task=t)
+                usage = _add_usage(usage, result.usage)
+            self.journal.append("attempt.finished", t.id, n=1, role="builder", seat=seat,
+                                commit=gitops.rev(request.cwd), session=result.session, mutants=[], usage=usage)
+        head = self._head(t, seat)
+        last = self._last(t.id, "crossing.done")
+        if last is None or last["builder"] != head:
+            work = t.dir / "cross"
+            try:
+                if not work.exists():
+                    gitops.clone_at(self.cfg.root, work, t.base)
+                gitops.fetch(work, self._clone_of(t, seat), head)
+                gitops.git(work, "checkout", "--quiet", "--force", "--detach", head)
+                gitops.git(work, "clean", "-fdxq")
+            except gitops.GitError as exc:
+                raise _Stop(Outcome("blocked", t.id, f"could not check the chore: {scrub_paths(str(exc))}")) from None
+            check = run_command(self.cfg.check, work, self.cfg.check_timeout, env=_no_bytecode_env())
+            passed = check.code == 0 and not check.timed_out
+            self._write(self._run_dir(t) / "crossings" / "1" / "check.txt", check.output)
+            last = self.journal.append("crossing.done", t.id, n=1, passed=passed, timed_out=check.timed_out,
+                                       count=receipt.probe_count(check.output, self.cfg.count_pattern), mutants={},
+                                       builder=head, challenger=None, evidence=[], mutant_of={})
+        if not last["passed"]:
+            raise _Stop(Outcome("blocked", t.id, f"the check failed on the chore: "
+                                                 f"{_tail(self._check_output(t, 1), 2000)}"))
+        landed = self._landed_on_main(t)
+        if landed is not None:
+            self._finish(t, f"parallax/ready/{t.id}")
+            return Outcome("landed", t.id, f"landed {landed[:12]}", commit=landed)
+        integrated = self._last(t.id, "task.integrated")
+        if integrated is None:
+            integrated = self.journal.append("task.integrated", t.id, verdict=receipt.verdict("chore", 0, 0, []),
+                                             checks="check passed", limitations=[])
+        message = (f"{t.id}: {_short_title(t.title)}\n\n"
+                   + receipt.trailers(t.id, None, self._seat_label(seat), None, integrated["checks"],
+                                      integrated["verdict"], integrated["limitations"]))
+        return self._integrate(t, [head], {}, message)
+
+    # Disputes and evidence
+    def _clean(self, t: _Task, done: dict, waived: set[str] | None = None) -> bool:
+        """Passed, and every mutant was caught or waived."""
+        waived = self._waived(t) if waived is None else waived
+        return done["passed"] and all(s == "killed" or m in waived for m, s in done["mutants"].items())
+
+    @staticmethod
+    def _mutant_of(events: Sequence[dict]) -> dict[str, str]:
+        """{dispute id: mutant id} over every crossing's reserved mutant evidence."""
+        found: dict[str, str] = {}
+        for e in events:
+            if e["type"] == "crossing.done":
+                found.update(e.get("mutant_of") or {})
+        return found
+
+    def _waived(self, t: _Task) -> set[str]:
+        events = self.events(t.id)
+        mutant_of = self._mutant_of(events)
+        return {mutant_of[e["dispute"]] for e in events
+                if e["type"] == "ruling.made" and e["kind"] == "mutant" and e["choice"] == "b"
+                and e["dispute"] in mutant_of}
+
+    def _next_dispute_number(self, t: _Task) -> int:
+        """Continue the task's dispute numbering past every id opened or reserved."""
+        pattern = re.compile(rf"D-{re.escape(t.id)}-(\d+)")
+        used = [0]
+        for e in self.events(t.id):
+            ids = [e["id"]] if e["type"] == "dispute.opened" else e.get("evidence", []) if e["type"] == "crossing.done" else []
+            used.extend(int(m.group(1)) for i in ids if (m := pattern.fullmatch(i)))
+        return max(used) + 1
+
+    def _labels(self, t: _Task) -> tuple[str, str]:
+        return f"{t.builder} (builder)", f"{t.challenger} (challenger)"
+
+    def _check_output(self, t: _Task, n: int) -> str:
+        try:
+            return (self._run_dir(t) / "crossings" / str(n) / "check.txt").read_text(encoding="utf-8")
+        except OSError:
+            return "(the check output of this crossing is missing)"
+
+    def _evidence_items(self, t: _Task, done: dict) -> list[dict]:
+        """`[{id, kind, text}]` for the crossing's reserved dispute ids; text has no absolute paths."""
+        if not done["passed"]:
+            return [{"id": i, "kind": "check", "text": _tail(self._check_output(t, done["n"]), 4000)}
+                    for i in done["evidence"]]
+        items = []
+        builder_clone = self._clone_of(t, t.builder)
+        for dispute_id, mid in (done.get("mutant_of") or {}).items():
+            mutant = next((m for m in reversed(self._all_mutants(t)) if m["id"] == mid), {"description": mid, "files": []})
+            diffs = []
+            for rel in mutant["files"]:
+                real = gitops.show_file(builder_clone, done["builder"], rel) or ""
+                try:
+                    fake = (t.dir / "mutants" / mid).joinpath(*rel.split("/")).read_text(encoding="utf-8")
+                except OSError:
+                    fake = ""
+                diffs.extend(difflib.unified_diff(real.splitlines(True), fake.splitlines(True), f"a/{rel}", f"b/{rel}"))
+            items.append({"id": dispute_id, "kind": "mutant",
+                          "text": scrub_paths(f"{mutant['description']}\n\n{''.join(diffs)}")})
+        return items
+
+    def _all_mutants(self, t: _Task) -> list[dict]:
+        return [m for e in self.events(t.id) if e.get("seat") == t.builder
+                and e["type"] in ("attempt.finished", "response.done") for m in (e.get("mutants") or [])]
+
+    def _evidence_dispute(self, t: _Task, item: dict, responses: Mapping[str, dict]) -> Dispute:
+        def position(seat: str) -> str:
+            response = responses.get(seat)
+            answer = next((a for a in (response or {}).get("answers", []) if a["dispute"] == item["id"]), None)
+            text = " ".join(x for x in ((answer or {}).get("cite", ""), (answer or {}).get("why", "")) if x.strip())
+            return text or "(no reason given)"
+
+        if item["kind"] == "check":
+            return Dispute(item["id"], "check", "The check fails. Whose reading of the contract is right?",
+                           position(t.builder), position(t.challenger), *self._labels(t), item["text"])
+        mid = self._mutant_of(self.events(t.id))[item["id"]]
+        description = item["text"].split("\n\n", 1)[0]
+        return Dispute(item["id"], "mutant", f"Mutant {mid} survived: {description}. Must the probes catch it?",
+                       "Yes: it breaks the contract.", position(t.challenger), *self._labels(t), item["text"])
 
     # Step 10
     def _land(self, t: _Task) -> Outcome:
@@ -585,12 +932,14 @@ class Conductor:
         if integrated is None:
             crossings = [e for e in events if e["type"] == "crossing.done"]
             last = crossings[-1]
-            failed = sum(1 for e in crossings if not (e["passed"] and all(s == "killed" for s in e["mutants"].values())))
+            waived = self._waived(t)
+            failed = sum(1 for e in crossings if not self._clean(t, e, waived))
             rulings = sum(1 for e in events if e["type"] == "ruling.made")
             limitations = self._limitations(events)
             integrated = self.journal.append(
                 "task.integrated", t.id, verdict=receipt.verdict(t.kind, failed, rulings, limitations),
-                checks=receipt.checks_line(last["count"], last["mutants"]), limitations=limitations)
+                checks=receipt.checks_line(last["count"], last["mutants"], sorted(waived)),
+                limitations=limitations)
         _, _, contract_sha = self._contract_text(t)
         built_by, challenged_by = (self._seat_label(s) for s in t.seats)
         message = (f"{t.id}: {_short_title(t.title)}\n\n"
@@ -600,7 +949,8 @@ class Conductor:
         files = {f".parallax/contracts/{t.id}.md": self._contract_text(t)[0]}
         return self._integrate(t, heads, files, message)
 
-    def _integrate(self, t: _Task, heads: Sequence[str], files: Mapping[str, str], message: str) -> Outcome:
+    def _integrate(self, t: _Task, heads: Sequence[str], files: Mapping[str, str], message: str,
+                   status: str = "landed") -> Outcome:
         """The landing loop: build the commit on current main in `<task folder>/land`, then advance main.
 
         `heads` are applied in order as `base..head`; `files` are written on top. The ledger
@@ -642,14 +992,24 @@ class Conductor:
                 self.say(f"{t.id}: parked on {park}")
                 return Outcome("parked", t.id, reason, commit=new)
             self._finish(t, park)
-            self.say(f"{t.id}: landed {new[:12]}; " + ", ".join(self._tokens(t, s) for s in t.seats))
-            return Outcome("landed", t.id, f"landed {new[:12]}", commit=new)
+            self.say(f"{t.id}: {status} {new[:12]}; " + ", ".join(self._tokens(t, s) for s in t.seats))
+            return Outcome(status, t.id, f"{status} {new[:12]}", commit=new)
         raise _Stop(Outcome("blocked", t.id, f"{self.cfg.main} kept moving; try again"))
+
+    def _ended_on_main(self, t: _Task, type: str) -> bool:
+        """Main's ledger already records `type` (task.integrated or task.dropped) for this task."""
+        text = gitops.show_file(self.cfg.root, self.cfg.main, LEDGER)
+        return bool(text) and any(e.get("task") == t.id and e.get("type") == type for e in parse_lines(text))
+
+    @staticmethod
+    def _changed(clone: Path, all_files: bool = False) -> list[str]:
+        """Paths changed in the clone, without the mutant and scratch folders unless `all_files`."""
+        paths = gitops.changed_paths(clone)
+        return paths if all_files else [p for p in paths if not p.startswith((f"{MUTANTS_DIR}/", f"{SCRATCH_DIR}/"))]
 
     def _landed_on_main(self, t: _Task) -> str | None:
         """The commit on main that landed this task, when main's ledger already records it."""
-        text = gitops.show_file(self.cfg.root, self.cfg.main, LEDGER)
-        if not text or not any(e.get("task") == t.id and e.get("type") == "task.integrated" for e in parse_lines(text)):
+        if not self._ended_on_main(t, "task.integrated"):
             return None
         # Anchored to a whole trailer line, so clamp-001 never matches clamp-0010. Task ids are
         # [A-Za-z0-9._-]; "." is the only character special in an extended regex.
@@ -678,8 +1038,8 @@ class Conductor:
         for e in self.events(t.id):
             if e.get("seat") != seat:
                 continue
-            if e["type"] in ("reading.sealed", "attempt.finished"):
-                session = e["session"]
+            if e["type"] in ("reading.sealed", "attempt.finished", "response.done"):
+                session = e.get("session", session)
             elif e["type"] == "attempt.voided":
                 session = None
         return session
