@@ -1,14 +1,16 @@
-"""The `parallax` command line: init, run, rule, status."""
+"""The `parallax` command line: init, run, rule, status, demo."""
 from __future__ import annotations
 
 import argparse
+import contextlib
+import secrets
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from parallax import seats
-from parallax.conductor import Conductor
-from parallax.config import CONFIG_NAME, SAMPLE_TOML, ConfigError, load_config
+from parallax import demo, gitops, seats
+from parallax.conductor import Conductor, Outcome
+from parallax.config import CONFIG_NAME, SAMPLE_TOML, ConfigError, load_config, state_home
 from parallax.decisions import render_card
 from parallax.gitops import GitError
 
@@ -18,7 +20,7 @@ _EXIT = {"landed": 0, "needs_ruling": 2, "parked": 3, "blocked": 3, "dropped": 3
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="parallax", description="Pair two agent CLIs on one task.")
-    sub = parser.add_subparsers(dest="command", required=True, metavar="{init,run,rule,status}")
+    sub = parser.add_subparsers(dest="command", required=True, metavar="{init,run,rule,status,demo}")
 
     def repo(p):
         p.add_argument("--repo", default=".", metavar="PATH", help="project root (default: current directory)")
@@ -39,6 +41,9 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--limitation", default="", metavar="TEXT")
     p = sub.add_parser("status", help="list tasks and what they wait on")
     repo(p)
+    p = sub.add_parser("demo", help="build a throwaway project and run the v0 demonstration")
+    p.add_argument("--dir", metavar="PATH", help="project folder (default: a new folder under the state home)")
+    p.add_argument("--stub", action="store_true", help="use scripted seats: spends nothing")
     return parser
 
 
@@ -58,16 +63,56 @@ def _init(root: Path) -> int:
     return 0
 
 
-def _run(args, root: Path) -> int:
-    cfg = load_config(root)
-    conductor = Conductor(cfg, seats.make_seats(cfg), say=print)
-    outcome = conductor.run(Path(args.task_file), builder=args.builder)
+def _report(outcome: Outcome) -> int:
     for dispute in outcome.disputes:
         print()
         print(render_card(dispute), end="")
         print()
     print(f"{outcome.task}: {outcome.status}" + (f"  {outcome.detail}" if outcome.detail else ""))
     return _EXIT.get(outcome.status, 3)
+
+
+def _run(args, root: Path) -> int:
+    cfg = load_config(root)
+    conductor = Conductor(cfg, seats.make_seats(cfg), say=print)
+    # A relative task path is the project's: `run tasks/x.md --repo <project>` works from anywhere.
+    task_file = Path(args.task_file)
+    if not task_file.is_absolute():
+        task_file = root / task_file
+    return _report(conductor.run(task_file, builder=args.builder))
+
+
+def _demo(args) -> int:
+    # Not tempfile: %TEMP% sits under %LOCALAPPDATA%, which a packaged app redirects (see state_home),
+    # and mkdtemp makes the folder owner-only.
+    where = Path(args.dir) if args.dir else state_home() / "demos" / f"clamp-{secrets.token_hex(4)}"
+    where = where.resolve()         # git runs inside the project, so a relative path would not clone
+    if not (where / CONFIG_NAME).exists():
+        demo.make_fixture(where, args.stub)
+    print(f"demo project: {where}")
+    cfg = load_config(where)
+    if args.stub and any(s.adapter != "stub" for s in cfg.seats):
+        raise ValueError(f"{where} was made for the real seats; run `parallax demo --dir ...` without --stub")
+    with demo.stub_adapter() if args.stub else contextlib.nullcontext():
+        conductor = Conductor(cfg, seats.make_seats(cfg), say=print)
+        outcome = conductor.run(where / demo.TASK_FILE)
+    code = _report(outcome)
+    again = f'python -m parallax demo --dir "{where}"' + (" --stub" if args.stub else "")
+    if outcome.status == "landed":
+        print()
+        print("Receipt (the landing commit's message):")
+        # A rerun after landing gets no commit back; find the landing by its trailer, not main's tip.
+        # Task ids are [A-Za-z0-9._-]: only the dot means anything to a regex.
+        commit = outcome.commit or gitops.git(where, "log", "-1", "--format=%H", "-E",
+                                              f"--grep=^Parallax-Task: {outcome.task.replace('.', '[.]')}$", cfg.main)
+        print(gitops.git(where, "log", "-1", "--format=%B", commit))
+    elif outcome.status == "needs_ruling":
+        for dispute in outcome.disputes:
+            print(f'rule with: python -m parallax rule {dispute.id} a --repo "{where}"   (or b)')
+        print(f"then run: {again}")
+    elif outcome.status in ("blocked", "parked"):
+        print(f"after fixing the cause, run: {again}")
+    return code
 
 
 def _rule(args, root: Path) -> int:
@@ -87,8 +132,10 @@ def _status(root: Path) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    root = Path(args.repo)
+    root = Path(getattr(args, "repo", ".")).resolve()     # git runs inside the project: a relative root would not clone
     try:
+        if args.command == "demo":
+            return _demo(args)
         if args.command == "init":
             return _init(root)
         if args.command == "run":
