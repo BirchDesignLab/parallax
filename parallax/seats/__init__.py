@@ -17,6 +17,8 @@ def make_seats(cfg: Config) -> dict[str, Seat]:
     return {seat_cfg.name: ADAPTERS[seat_cfg.adapter](seat_cfg, cfg) for seat_cfg in cfg.seats}
 
 
+from parallax.seats.claude import ClaudeSeat
 from parallax.seats.codex import CodexSeat
 
+ADAPTERS["claude"] = lambda seat, cfg: ClaudeSeat(seat, cfg)
 ADAPTERS["codex"] = lambda seat, cfg: CodexSeat(seat, cfg)

@@ -16,8 +16,11 @@ class Live(unittest.TestCase):
         clone = task_folder / "seat"
         gitops.clone_at(make_repo(), clone, "main")
         out = Path(tempfile.mkdtemp(prefix="plx live "))
-        first = seat.run(SeatRequest("probe", "Create a file named made.txt containing: hi. Then answer with summary 'done' and blocked ''.",
+        first = seat.run(SeatRequest("probe", "Create a file named made.txt whose whole content is the two letters hi, with no punctuation. "
+                                     "Then answer with summary 'done' and blocked ''.",
                                      clone, PROBE, True, None, out / "1"))
+        if first.session:
+            self.addCleanup(seat.discard, first.session, clone)                 # runs before the folder goes, even on failure
         self.assertTrue(first.ok, first.error)
         self.assertEqual((clone / "made.txt").read_text(encoding="utf-8").strip(), "hi")   # this account can read what the seat wrote
         self.assertTrue(folders.is_private(task_folder))
@@ -25,10 +28,15 @@ class Live(unittest.TestCase):
                                       clone, PROBE, False, first.session, out / "2"))
         self.assertTrue(second.ok, second.error)
         self.assertIn("made.txt", second.output["summary"])
-        seat.discard(first.session, clone)
 
     def test_codex(self):
         from parallax.seats.codex import CodexSeat
         root = make_repo({"parallax.toml": SAMPLE_TOML})
         cfg = load_config(root)
         self.exercise(CodexSeat(cfg.seats[0], cfg))
+
+    def test_claude(self):
+        from parallax.seats.claude import ClaudeSeat
+        root = make_repo({"parallax.toml": SAMPLE_TOML})
+        cfg = load_config(root)
+        self.exercise(ClaudeSeat(cfg.seats[1], cfg))
