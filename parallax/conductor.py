@@ -4,7 +4,8 @@ Every step is an event in the journal, and every step first looks for its own co
 event and skips itself when it finds one. That is the whole resume mechanism: a crash, a
 pause for a ruling or a blocked seat all resume by running the same task file again.
 
-Part 1 (this file so far): lock, open, sealed readings, reveal, settlement, rulings, contract.
+Part 1: lock, open, sealed readings, reveal, settlement, rulings, contract.
+Part 2: braid (parallel attempts), crossing, landing.
 """
 from __future__ import annotations
 
@@ -12,21 +13,28 @@ import json
 import os
 import re
 import secrets
+import shutil
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from parallax import audit, briefs, decisions, folders, gitops, schemas
+from parallax import audit, briefs, decisions, folders, gitops, receipt, schemas, scopes
 from parallax.config import Config, repo_key, state_home
+from parallax.crossing import cross, validate_mutants
 from parallax.decisions import Dispute, Point
-from parallax.ledger import Journal, parse_lines, sha256_text
+from parallax.ledger import Journal, parse_lines, publish, sha256_text
+from parallax.procs import run_command
+from parallax.redact import scrub_paths
 from parallax.seats.base import Seat, SeatRequest, SeatResult
 
 _TASK_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _CHORE = re.compile(r"(?i)^kind:\s*chore\s*$")
 _STOP_AFTER = (None, "contract")
 LEDGER = ".parallax/ledger.jsonl"
+MUTANTS_DIR = ".parallax-mutants"
+SCRATCH_DIR = ".parallax-scratch"
+_LAND_TRIES = 3
 
 
 @dataclass(frozen=True)
@@ -125,6 +133,26 @@ def _canonical(output: dict) -> str:
     return json.dumps(output, sort_keys=True, indent=2)
 
 
+def _tail(text: str, n: int) -> str:
+    """The last `n` characters of tool output, with absolute paths scrubbed."""
+    return scrub_paths(text[-n:])
+
+
+def _short_title(title: str) -> str:
+    if len(title) <= 60:
+        return title
+    cut = title.rfind(" ", 0, 61)
+    return (title[:cut] if cut > 0 else title[:60]).rstrip()
+
+
+def _no_bytecode_env() -> dict[str, str]:
+    return dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+
+
+def _add_usage(a: Mapping[str, int], b: Mapping[str, int]) -> dict:
+    return {k: a.get(k, 0) + b.get(k, 0) for k in {*a, *b}}
+
+
 class Conductor:
     cfg: Config
 
@@ -220,6 +248,13 @@ class Conductor:
 
     def _run(self, task: str, task_file: Path, builder: str | None, stop_after: str | None) -> Outcome:
         text = task_file.read_text(encoding="utf-8")
+        if not self.journal.events(task):
+            # Nothing in flight: a task already in the ledger is finished, not started again.
+            ended = {e["type"] for e in self.events(task)}
+            if "task.dropped" in ended:
+                return Outcome("dropped", task, f"{task} was already dropped")
+            if "task.integrated" in ended:
+                return Outcome("landed", task, f"{task} has already landed")
         t = self._open(task, text, builder)
         if t.kind == "chore":
             raise NotImplementedError("solo")
@@ -230,7 +265,15 @@ class Conductor:
         self._contract(t)
         if stop_after == "contract":
             return Outcome("stopped", t.id, "stopped after the contract was frozen")
-        raise NotImplementedError("braid")
+        self._braid(t)
+        done = self._crossing(t)
+        if not done["passed"] or any(state != "killed" for state in done["mutants"].values()):
+            return self._after_failed_crossing(t, done)
+        return self._land(t)
+
+    def _after_failed_crossing(self, t: _Task, done: dict) -> Outcome:
+        """Task 11 replaces this with the dispute loop."""
+        return Outcome("blocked", t.id, detail="crossing failed")
 
     # Step 1
     def _lock(self, task: str) -> Path | Outcome:
@@ -382,6 +425,319 @@ class Conductor:
         self.journal.append("contract.frozen", t.id, version=1, sha=sha256_text(text))
         self.say(f"{t.id}: contract v1 frozen")
 
+    # Step 8
+    def _braid(self, t: _Task) -> None:
+        todo = [seat for seat in t.seats if self._last(t.id, "attempt.finished", role=t.role(seat)) is None]
+        self._parallel([lambda seat=seat: self._attempt(t, seat) for seat in todo])
+
+    def _attempt(self, t: _Task, seat: str) -> None:
+        role = t.role(seat)
+        n = 1 + sum(1 for e in self.events(t.id) if e["type"] == "attempt.finished" and e["role"] == role)
+        clone = self._clone_of(t, seat)
+        if self._last(t.id, "attempt.started", n=n, role=role) is not None:
+            # An attempt that started but never finished: throw away whatever it left behind.
+            gitops.git(clone, "reset", "--quiet", "--hard")
+            gitops.git(clone, "clean", "-fdxq")
+        self.journal.append("attempt.started", t.id, n=n, role=role, seat=seat)
+        contract, _, _ = self._contract_text(t)
+        if role == "builder":
+            stage, brief, schema = "build", briefs.build(contract, self.cfg), schemas.BUILD
+        else:
+            stage, brief, schema = "probe", briefs.probe(contract, self.cfg), schemas.PROBE
+        request = SeatRequest(stage, brief, clone, schema, writable=True, session=self._session(t, seat),
+                              out_dir=self._artifact_dir(t, seat, stage))
+        voids = []
+
+        def void(request: SeatRequest, result: SeatResult, hits: list[str]) -> SeatRequest:
+            self.journal.append("attempt.voided", t.id, n=n, role=role, seat=seat, hits=hits)
+            session = result.session or request.session
+            if session:
+                self.seats[seat].discard(session, request.cwd)
+            self._remove_clone(t, seat, request.cwd)
+            fresh = self._new_clone(t, seat)
+            voids.append(hits)
+            self.say(f"{t.id}: {seat}'s {stage} named the other seat's folder; voided")
+            if len(voids) >= 2:
+                raise _Stop(Outcome("blocked", t.id, f"{seat}'s {stage} was voided twice: it named {', '.join(hits)}"))
+            # A fresh session in a fresh clone, from the contract alone (never a retry brief).
+            return replace(request, brief=brief, cwd=fresh, session=None, out_dir=self._artifact_dir(t, seat, stage))
+
+        result, request = self._call(seat, request, task=t, void=void)
+        usage = dict(result.usage)
+        rejections = 0
+        while True:
+            if result.output["blocked"].strip():
+                self.say(f"{t.id}: {seat} is blocked at {stage}: {result.output['blocked']}")
+                raise _Stop(Outcome("blocked", t.id, f"{seat} is blocked at {stage}: {result.output['blocked']}"))
+            mutants = result.output["mutants"] if role == "builder" else None
+            reasons = self._validate(t, seat, request.cwd, mutants, f"{t.id} {role} {n}")
+            if not reasons:
+                break
+            reason = "; ".join(reasons)
+            self.journal.append("attempt.rejected", t.id, n=n, role=role, seat=seat, reason=reason)
+            rejections += 1
+            self.say(f"{t.id}: {seat}'s {stage} rejected: {reason}")
+            if rejections >= 2:
+                raise _Stop(Outcome("blocked", t.id, f"{seat}'s {stage} was rejected twice: {reason}"))
+            retry = SeatRequest(stage, briefs.retry(reason), request.cwd, schema, writable=True,
+                                session=result.session, out_dir=self._artifact_dir(t, seat, stage))
+            result, request = self._call(seat, retry, task=t, void=void)
+            usage = _add_usage(usage, result.usage)
+        self.journal.append("attempt.finished", t.id, n=n, role=role, seat=seat, commit=gitops.rev(request.cwd),
+                            session=result.session, mutants=list(mutants or []), usage=usage)
+        self.say(f"{t.id}: {seat}'s {stage} {n} finished")
+
+    def _validate(self, t: _Task, seat: str, clone: Path, mutants: list[dict] | None, message: str) -> list[str]:
+        """Check a seat's work in its clone; when it passes, move mutants out and snapshot it.
+
+        `mutants` is the builder's list to validate, or None when there are none to check
+        (the challenger). Returns the reasons for rejecting the work; empty means it is
+        committed in the clone.
+        """
+        role = t.role(seat)
+        scope = self.cfg.builder_scope if role == "builder" else self.cfg.challenger_scope
+        changed = [p for p in gitops.changed_paths(clone)
+                   if not p.startswith((f"{MUTANTS_DIR}/", f"{SCRATCH_DIR}/"))]
+        reasons = []
+        outside = scopes.outside(changed, scope)
+        if outside:
+            reasons.append(f"you changed files outside your paths: {', '.join(outside)}")
+        if mutants is not None:
+            reasons.extend(validate_mutants(clone, clone / MUTANTS_DIR, mutants, self.cfg))
+        if reasons:
+            return reasons
+        if mutants is not None:
+            self._move_mutants(t, clone, mutants)
+        gitops.snapshot(clone, message, exclude=[MUTANTS_DIR, SCRATCH_DIR])
+        if self.cfg.lint:
+            lint = run_command(self.cfg.lint, clone, self.cfg.check_timeout, env=_no_bytecode_env())
+            # Put the clone back exactly as the snapshot left it: nothing lint writes is ever committed.
+            gitops.git(clone, "reset", "--quiet", "--hard")
+            gitops.git(clone, "clean", "-fdxq", "-e", SCRATCH_DIR)
+            if lint.timed_out or lint.code != 0:
+                if mutants is not None:
+                    self._restore_mutants(t, clone, mutants)    # so a retry can keep them
+                return [f"lint failed: {_tail(lint.output, 2000)}"]
+        return []
+
+    def _move_mutants(self, t: _Task, clone: Path, mutants: list[dict]) -> None:
+        """Move `.parallax-mutants/<id>/` out of the builder's clone into `<task folder>/mutants/<id>/`."""
+        store = t.dir / "mutants"
+        store.mkdir(exist_ok=True)
+        source = clone / MUTANTS_DIR
+        for mutant in mutants:
+            target = store / mutant["id"]
+            if target.exists():
+                self._remove_inside(store, target)
+            shutil.move(str(source / mutant["id"]), str(target))
+        if source.exists():
+            self._remove_inside(clone, source)                  # anything unlisted never reaches a commit
+
+    def _restore_mutants(self, t: _Task, clone: Path, mutants: list[dict]) -> None:
+        for mutant in mutants:
+            shutil.copytree(t.dir / "mutants" / mutant["id"], clone / MUTANTS_DIR / mutant["id"], dirs_exist_ok=True)
+
+    # Step 9
+    def _crossing(self, t: _Task) -> dict:
+        """Cross the seats' latest commits, unless the last crossing already did exactly that."""
+        builder, challenger = self._head(t, t.builder), self._head(t, t.challenger)
+        last = self._last(t.id, "crossing.done")
+        if last is not None and (last["builder"], last["challenger"]) == (builder, challenger):
+            return last
+        n = 1 + sum(1 for e in self.events(t.id) if e["type"] == "crossing.done")
+        work = t.dir / "cross"
+        try:
+            if not work.exists():
+                gitops.clone_at(self.cfg.root, work, t.base)
+            gitops.fetch(work, self._clone_of(t, t.builder), builder)
+            gitops.fetch(work, self._clone_of(t, t.challenger), challenger)
+        except gitops.GitError as exc:
+            raise _Stop(Outcome("blocked", t.id, f"crossing {n}: could not gather the seats' commits "
+                                                 f"(was a clone removed?): {scrub_paths(str(exc))}")) from None
+        mutants = self._mutants(t)
+        try:
+            result = cross(work, t.base, builder, challenger, self.cfg, t.dir / "mutants", mutants)
+        except gitops.GitError as exc:
+            raise _Stop(Outcome("blocked", t.id, f"crossing {n}: the probes do not apply on the build: "
+                                                 f"{scrub_paths(str(exc))}")) from None
+        self._write(self._run_dir(t) / "crossings" / str(n) / "check.txt", result.output)
+        done = self.journal.append("crossing.done", t.id, n=n, passed=result.passed, timed_out=result.timed_out,
+                                   count=result.count, mutants=result.mutants, builder=builder,
+                                   challenger=challenger, evidence=self._reserve_evidence(t, result))
+        caught = sum(1 for s in result.mutants.values() if s == "killed")
+        self.say(f"{t.id}: crossing {n}: check {'passed' if result.passed else 'failed'}"
+                 + (f", {caught} of {len(result.mutants)} mutants caught" if result.passed else ""))
+        return done
+
+    def _reserve_evidence(self, t: _Task, result) -> list[str]:
+        """Dispute ids reserved for this crossing's failures. Task 11 fills this in."""
+        return []
+
+    # Step 10
+    def _land(self, t: _Task) -> Outcome:
+        landed = self._landed_on_main(t)
+        if landed is not None:
+            # The process died after main advanced but before the journal was dropped.
+            self._finish(t, f"parallax/ready/{t.id}")
+            return Outcome("landed", t.id, f"landed {landed[:12]}", commit=landed)
+        events = self.events(t.id)
+        integrated = self._last(t.id, "task.integrated")
+        if integrated is None:
+            crossings = [e for e in events if e["type"] == "crossing.done"]
+            last = crossings[-1]
+            failed = sum(1 for e in crossings if not (e["passed"] and all(s == "killed" for s in e["mutants"].values())))
+            rulings = sum(1 for e in events if e["type"] == "ruling.made")
+            limitations = self._limitations(events)
+            integrated = self.journal.append(
+                "task.integrated", t.id, verdict=receipt.verdict(t.kind, failed, rulings, limitations),
+                checks=receipt.checks_line(last["count"], last["mutants"]), limitations=limitations)
+        _, _, contract_sha = self._contract_text(t)
+        built_by, challenged_by = (self._seat_label(s) for s in t.seats)
+        message = (f"{t.id}: {_short_title(t.title)}\n\n"
+                   + receipt.trailers(t.id, contract_sha, built_by, challenged_by, integrated["checks"],
+                                      integrated["verdict"], integrated["limitations"]))
+        heads = [self._head(t, t.builder), self._head(t, t.challenger)]
+        files = {f".parallax/contracts/{t.id}.md": self._contract_text(t)[0]}
+        return self._integrate(t, heads, files, message)
+
+    def _integrate(self, t: _Task, heads: Sequence[str], files: Mapping[str, str], message: str) -> Outcome:
+        """The landing loop: build the commit on current main in `<task folder>/land`, then advance main.
+
+        `heads` are applied in order as `base..head`; `files` are written on top. The ledger
+        and PRECEDENTS.md are always written. Task 11's ledger-only drop reuses this with no heads.
+        """
+        park = f"parallax/ready/{t.id}"
+        root = self.cfg.root
+        for _ in range(_LAND_TRIES):
+            expected = gitops.rev(root, self.cfg.main)
+            land = t.dir / "land"
+            if land.exists():
+                self._remove_inside(t.dir, land)
+            gitops.clone_at(root, land, expected)
+            try:
+                for seat, head in zip(t.seats, heads):
+                    gitops.fetch(land, self._clone_of(t, seat), head)
+                    gitops.apply_range(land, t.base, head)
+            except gitops.GitError as exc:
+                raise _Stop(Outcome("blocked", t.id, f"the task's changes do not apply on {self.cfg.main}: "
+                                                     f"{scrub_paths(str(exc))}")) from None
+            publish(self.journal.events(t.id), land / LEDGER)
+            for rel, text in files.items():
+                self._write(land / rel, text)
+            self._write(land / ".parallax" / "PRECEDENTS.md",
+                        decisions.render_precedents(decisions.precedents(self.events())))
+            gitops.git(land, "add", "-A")
+            check = run_command(self.cfg.check, land, self.cfg.check_timeout, env=_no_bytecode_env())
+            if check.timed_out or check.code != 0:
+                raise _Stop(Outcome("blocked", t.id, f"the check failed on top of {self.cfg.main}: "
+                                                     f"{_tail(check.output, 2000)}"))
+            new = gitops.commit_staged(land, message, gitops.identity(root))
+            try:
+                moved = gitops.advance_main(root, self.cfg.main, land, new, expected, park)
+            except gitops.MainMoved:
+                continue
+            if moved == "parked":
+                reason = f"main has uncommitted changes in the way; the result is on {park}"
+                self.journal.append("task.parked", t.id, branch=park, reason=reason)
+                self.say(f"{t.id}: parked on {park}")
+                return Outcome("parked", t.id, reason, commit=new)
+            self._finish(t, park)
+            self.say(f"{t.id}: landed {new[:12]}; " + ", ".join(self._tokens(t, s) for s in t.seats))
+            return Outcome("landed", t.id, f"landed {new[:12]}", commit=new)
+        raise _Stop(Outcome("blocked", t.id, f"{self.cfg.main} kept moving; try again"))
+
+    def _landed_on_main(self, t: _Task) -> str | None:
+        """The commit on main that landed this task, when main's ledger already records it."""
+        text = gitops.show_file(self.cfg.root, self.cfg.main, LEDGER)
+        if not text or not any(e.get("task") == t.id and e.get("type") == "task.integrated" for e in parse_lines(text)):
+            return None
+        # Anchored to a whole trailer line, so clamp-001 never matches clamp-0010. Task ids are
+        # [A-Za-z0-9._-]; "." is the only character special in an extended regex.
+        found = gitops.git(self.cfg.root, "log", "-1", "--format=%H", "--extended-regexp",
+                           f"--grep=^Parallax-Task: {t.id.replace('.', chr(92) + '.')}$", self.cfg.main)
+        return found or gitops.rev(self.cfg.root, self.cfg.main)
+
+    def _finish(self, t: _Task, park: str) -> None:
+        """After main advanced: forget the task's journal, sessions, state folder and park branch."""
+        sessions = {s: (self._session(t, s), self._clone_of(t, s)) for s in t.seats}
+        self.journal.drop_task(t.id)
+        for seat, (session, clone) in sessions.items():
+            if session:
+                self.seats[seat].discard(session, clone)
+        task_root = self.home / repo_key(self.cfg.root)
+        if t.dir.parent == task_root and t.dir.name == t.id and not gitops.remove_tree(t.dir):
+            self.say(f"{t.id}: could not remove the task's state folder; remove it by hand")
+        if gitops.git(self.cfg.root, "branch", "--list", park):
+            gitops.git(self.cfg.root, "branch", "-D", park)
+
+    # ------------------------------------------------------ task bookkeeping
+
+    def _session(self, t: _Task, seat: str) -> str | None:
+        """The seat's live session: from its reading, replaced by later attempts, cleared by a void."""
+        session = None
+        for e in self.events(t.id):
+            if e.get("seat") != seat:
+                continue
+            if e["type"] in ("reading.sealed", "attempt.finished"):
+                session = e["session"]
+            elif e["type"] == "attempt.voided":
+                session = None
+        return session
+
+    def _head(self, t: _Task, seat: str) -> str:
+        """The seat's latest accepted commit (attempt.finished, or a later response.done)."""
+        head = None
+        for e in self.events(t.id):
+            if e.get("seat") == seat and e["type"] in ("attempt.finished", "response.done") and e.get("commit"):
+                head = e["commit"]
+        if head is None:
+            raise RuntimeError(f"{seat} has no finished attempt in {t.id}")
+        return head
+
+    def _mutants(self, t: _Task) -> list[dict]:
+        """The builder's latest mutant list (an event with a non-empty `mutants` list wins)."""
+        mutants: list[dict] = []
+        for e in self.events(t.id):
+            if (e.get("seat") == t.builder and e["type"] in ("attempt.finished", "response.done")
+                    and isinstance(e.get("mutants"), list) and e["mutants"]):
+                mutants = e["mutants"]
+        return mutants
+
+    def _contract_text(self, t: _Task) -> tuple[str, int, str]:
+        """(text, version, sha) of the latest frozen contract, checked against its recorded sha."""
+        frozen = self._last(t.id, "contract.frozen")
+        path = self._run_dir(t) / f"contract-v{frozen['version']}.md"
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            text = None
+        if text is None or sha256_text(text) != frozen["sha"]:
+            raise _Stop(Outcome("blocked", t.id, f"{path.name} is missing or no longer matches its frozen sha"))
+        return text, frozen["version"], frozen["sha"]
+
+    @staticmethod
+    def _limitations(events: Sequence[dict]) -> list[str]:
+        return [e["limitation"] for e in events if e["type"] == "ruling.made" and e.get("limitation")]
+
+    def _seat_label(self, seat: str) -> str:
+        s = self.seats[seat]
+        return f"{seat} {s.model}/{s.effort}"
+
+    def _tokens(self, t: _Task, seat: str) -> str:
+        total = {"input": 0, "output": 0}
+        for e in self.events(t.id):
+            if e.get("seat") == seat and isinstance(e.get("usage"), dict):
+                total = _add_usage(total, e["usage"])
+        return f"{seat} {total['input']} in / {total['output']} out"
+
+    @staticmethod
+    def _remove_inside(parent: Path, path: Path) -> None:
+        """Delete `path`, which must sit directly inside `parent` (a folder the conductor owns)."""
+        if Path(path).resolve().parent != Path(parent).resolve():
+            raise RuntimeError(f"refusing to remove {path}: it is not directly inside {parent}")
+        if not gitops.remove_tree(path):
+            raise RuntimeError(f"could not remove {path}; close anything using it")
+
     # ------------------------------------------------------------- seat calls
 
     def _call(self, seat: str, request: SeatRequest, *, task: _Task,
@@ -404,7 +760,12 @@ class Conductor:
             if not folders.is_private(t.dir):
                 raise _Stop(Outcome("blocked", t.id, "the task's state folder is no longer private"))
             result = self.seats[seat].run(request)
-            hits = audit.forbidden_hits(result.events or "", self._clones_of(t, t.other(seat)))
+            # The other seat's clones, and the conductor's own folders in the task's state folder
+            # (spec: "any path belonging to the other seat or to the state folder"). A seat's own
+            # clone sits in the same folder, so the task folder itself cannot be forbidden.
+            forbidden = self._clones_of(t, t.other(seat)) + [
+                str(t.dir / name) for name in ("cross", "land", "mutants", "artifacts")]
+            hits = audit.forbidden_hits(result.events or "", forbidden)
             if hits:
                 if void is None:
                     error = f"named the other seat's folder: {', '.join(hits)}"
