@@ -92,12 +92,12 @@ Ways this could run and still be a failure:
 
 ### Keeping the blind honest
 
-In v0 the blind is arranged and audited, not guaranteed. Seats are treated as fallible, not hostile: the measures below stop an agent that wanders, not one that sets out to cheat, and no receipt claims more than that.
+The blind is enforced where each CLI can enforce it and audited everywhere. Seats are treated as fallible, not hostile, and no receipt claims more than that.
 
-- **Placement.** Worktrees live outside the repo under random names. A seat is told only its own path.
-- **Confinement.** Each seat is held as tightly as its CLI allows. Claude's file tools are restricted to its worktree and its shell is limited to an allowlist, by default only the project's check command. Codex runs in its `workspace-write` sandbox. Whether that sandbox can also refuse reads outside the worktree on Windows is not yet verified.
+- **Placement.** Each seat's worktree is a separate clone of the project with no git link to the other seat's. It sits under a random name in a state folder inside the human's profile (`%LOCALAPPDATA%\parallax` by default), outside the repo. A seat is told only its own path. Nothing a seat produces enters the project's own repo until the task lands.
+- **Confinement.** Codex runs in its `workspace-write` sandbox. On this machine that sandbox runs commands as a separate Windows user, which was refused both reads and writes in a second folder beside its own (verified 2026-11-16). Claude gets file tools restricted to its own worktree and no shell at all. Those flags are accepted, but their effect is not yet verified because the Claude CLI is not signed in.
 - **Seal.** Readings and attempts are hashed into the ledger before reveal, so nothing can be adjusted afterwards.
-- **Audit.** Both CLIs emit an event stream of the commands and file reads a seat performed. After each attempt the conductor scans it for any path belonging to the other seat. This is best effort: a script that reads another worktree without naming it would get past.
+- **Audit.** Both CLIs emit an event stream of what a seat did. After each attempt the conductor scans it for any path belonging to the other seat or to the state folder. This is the second line of defense and it is best effort: a script that reads another worktree without naming it would get past.
 - **Voiding.** A hit voids the attempt, and the contamination goes with it: the session, the worktree and everything the attempt produced are discarded. The rerun is a new session in a new worktree, starting from the contract alone.
 
 Seats never message each other. Everything a seat learns about the other side arrives from the conductor at steps 3 and 8. A seat keeps one session for the length of a task, so a repair starts with its own context. The exceptions are a voided attempt, as above, and a new task, which always starts a new session.
@@ -106,6 +106,7 @@ Seats never message each other. Everything a seat learns about the other side ar
 
 - Each role has path patterns in the project config, for example builder `src/**`, challenger `tests/**`. Files both would need (lockfiles, manifests) are listed as exclusive and belong to the builder for that task.
 - Seats only edit files. The conductor does all git work: it checks every changed path against the seat's patterns, rejects the attempt if any falls outside, and makes the commits itself.
+- The conductor also runs every check. Seats are not relied on to run project tools: on this machine Codex's sandbox cannot execute Python at all. A project may name a quick `lint` command, which the conductor runs on a seat's worktree after each attempt; a failure goes straight back to that seat and does not use up a repair round.
 - **Ruling:** a seat edits and runs commands inside its own worktree without asking. How each seat is confined is described under "Keeping the blind honest".
 
 ### Disputes
@@ -140,7 +141,7 @@ Verdict is one of `consensus` (clean at first crossing), `resolved` (settled by 
 
 ### Ledger and resuming
 
-`.parallax/ledger.jsonl` in the project is the source of truth for decisions: readings, contracts, attempts, crossings, disputes, rulings, receipts. It is plain text so that either agent, the human, and git can all read it, and each integration commit includes the lines it added, so the history of decisions travels with the code. Logs, event streams and pending cards live in `.parallax/run/`, which git ignores.
+`.parallax/ledger.jsonl` in the project is the source of truth for decisions: readings, contracts, attempts, crossings, disputes, rulings, receipts. It is plain text so that either agent, the human, and git can all read it. While a task is running its events go to a journal in `.parallax/run/`; landing moves them into the ledger as part of the integration commit, so the history of decisions travels with the code. The journal, check logs and pending cards live in `.parallax/run/`, which git ignores. Anything one seat must not see before the crossing (the other seat's worktree, its output and its event stream) is kept in the state folder outside the repo.
 
 Every step records its completion. `parallax run` works out the current step from the ledger, so a crash or a pause for a ruling resumes cleanly; an attempt that started but never finished is discarded and rerun.
 
@@ -148,7 +149,7 @@ Every step records its completion. `parallax run` works out the current step fro
 
 An adapter turns "run this brief in this folder and return output matching this schema" into a CLI invocation, and returns the parsed output, the session id, the event stream and the token usage. Model and effort are set explicitly on every launch and written to the ledger; the round-0 run showed Codex's event stream does not report them.
 
-Seats launch without the human's personal plugins, hooks and MCP servers (`--safe-mode` for Claude, `--ignore-user-config` for Codex), so briefs are the only instructions and nothing else spends tokens.
+Seats launch without the human's personal plugins, hooks and MCP servers (`--safe-mode` for Claude, `--ignore-user-config` for Codex), so briefs are the only instructions and nothing else spends tokens. Two things have to be put back. Codex needs its `[windows] sandbox` setting re-supplied, or every command is refused. And both seats are launched with other agents' environment variables removed: a Claude seat started from inside a Claude Code session otherwise fails to authenticate, and the inherited variables include the account email.
 
 A third adapter, `stub`, replays scripted outputs. The conductor's own tests use it, so the whole lifecycle is testable without spending a token.
 
@@ -158,6 +159,7 @@ A third adapter, `stub`, replays scripted outputs. The conductor's own tests use
 
     [project]
     check = "python -m unittest discover -s tests"
+    lint  = "python -m compileall -q ."
     main  = "main"
 
     [scopes]
@@ -214,9 +216,16 @@ Done means: the stub-seat test suite passes, and the demo completes with real se
 
 **Claude's calls in answer to Codex's builder questions, for the human to check:**
 
-- The v0 blind is arranged and audited, not guaranteed, and receipts say no more than that. Hard isolation (separate OS users or containers) is deferred.
+- The blind is enforced only as far as each CLI enforces it, and audited beyond that; receipts say no more than that. Isolation beyond what the CLIs provide (separate OS users or containers of our own) is deferred.
 - Main never receives a failing check; a limitation means amending the contract and probes first.
 - The demo counts whether or not the two models happen to disagree.
+
+**Changed by the smoke test (`scripts/probes/seat_smoke.py`), Claude's calls for the human to check:**
+
+- Seat worktrees are separate clones in a state folder under the human's profile, not linked git worktrees. Linked worktrees would let one seat find the other through git, and seat commits would sit in the project's repo where the other seat could read them.
+- Seats do not run checks; the conductor does. Neither side can run the other's half before the crossing anyway, and Codex's sandbox cannot run Python here.
+- Because seats run nothing, the Claude seat gets no shell at all, which is stronger than the allowlist first proposed.
+- Pre-crossing artifacts live in the state folder, not in `.parallax/run/`.
 
 ## Verified and not yet verified
 
@@ -228,14 +237,23 @@ Verified on this machine during round 0:
 - Codex's Windows sandbox failed to start one process (`CreateProcessWithLogonW failed: 1056`) and recovered. Adapters must tolerate a transient launch failure.
 - On Windows a file named `claude.md` is loaded by Claude Code as `CLAUDE.md`, that is, as instructions. Nothing the framework writes may be named after an agent's instruction file.
 
-Not yet verified, and the first thing to test before building on it:
+Verified by `scripts/probes/seat_smoke.py` on 2026-11-16:
 
-- Claude headless editing files unattended with `--safe-mode`, `--json-schema`, file tools restricted to the worktree, and a shell allowlist holding only the check command.
-- Whether Codex's Windows sandbox can refuse reads outside its worktree.
-- Codex writing files under `workspace-write` in a worktree outside the repo, with `--output-schema`.
-- The shape of each CLI's event stream for file reads, as the audit needs.
-- Resuming a session headless for a repair, on both CLIs.
-- Both CLIs running at the same moment.
+- `codex exec --ignore-user-config -c windows.sandbox="elevated" --sandbox workspace-write`, run in a folder under the profile, writes files there. `--output-schema` shapes the final message and `-o` captures it. With `--ignore-user-config` alone, every command is "rejected: blocked by policy".
+- That sandbox runs commands as the Windows user `CodexSandboxOffline`, and it was refused both a read and a write in a second folder beside its own ("Access is denied").
+- `codex exec resume <thread id>` continues a session headless. It takes no `--sandbox` flag, so `-c sandbox_mode="workspace-write"` is passed instead, and it works.
+- Codex's event stream: `thread.started` carries the session id; `item.completed` of type `command_execution` carries each command with its output and exit code; `turn.completed` carries token usage.
+- Inside the Codex sandbox `python`, `py` and `uv` do not resolve, though `git` and `node` do. They are installed under the human's profile.
+- Claude accepts `--safe-mode --restricted --tools ... --permission-mode acceptEdits --permission-prompts none --output-format stream-json --verbose` together. The stream opens with a `system/init` event listing the tools and ends with a `result` event carrying `is_error`, `result`, `session_id` and `usage`.
+- The standalone Claude CLI is not signed in: `claude auth status` reports `loggedIn: false`. A `claude -p` call returns exit code 1 and a `result` event with `is_error: true`.
+
+Not yet verified. All but the last need the human to run `claude auth login` first:
+
+- Claude's structured output with `--json-schema`, and the key it arrives under.
+- Claude refusing reads outside its folder under `--restricted`.
+- Claude resuming a session headless.
+- Claude and Codex running at the same moment. Codex's side passed.
+- Codex's sandbox refusing the other seat's worktree when both live under `%LOCALAPPDATA%\parallax` rather than `%TEMP%`.
 
 ## Left to the builder
 

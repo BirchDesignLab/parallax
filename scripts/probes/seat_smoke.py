@@ -7,9 +7,11 @@ exact flags and event shapes instead of guessing. Rerun it when either CLI
 updates.
 
 Cases (run all, or name some on the command line):
+  claude_auth      is the standalone CLI signed in (with and without our env)?
+  codex_env        which tools a sandboxed Codex command can see, per sandbox mode
   claude_schema    structured output via --json-schema; shape of the result
-  claude_confined  unattended edits in cwd; shell limited to an allowlist;
-                   reads and commands outside the allowlist refused
+  claude_confined  unattended edits in cwd with file tools only; reads outside
+                   the folder refused; no shell tool available
   claude_resume    a second headless call continues the first one's session
   codex_write      workspace-write in a git worktree outside the repo, with
                    --output-schema; can it read or write another worktree?
@@ -39,6 +41,24 @@ from pathlib import Path
 CLAUDE = shutil.which("claude")
 CODEX = shutil.which("codex")
 CODEX_PIN = ["-m", "gpt-6-astra", "-c", 'model_reasoning_effort="low"']
+# Finding (2026-11-16): --ignore-user-config alone drops `[windows] sandbox =
+# "elevated"`, after which every command is "rejected: blocked by policy".
+# Re-supplying that one key keeps the seat lean and able to run commands.
+CODEX_LEAN = ["--ignore-user-config", "-c", 'windows.sandbox="elevated"']
+_SCRUB_PREFIXES = ("CLAUDE", "ANTHROPIC", "OPENAI", "CODEX")
+_KEEP = {"claude": {"ANTHROPIC_API_KEY"}, "codex": {"OPENAI_API_KEY", "CODEX_HOME"}}
+
+
+def seat_env(kind: str) -> dict[str, str]:
+    """Environment for a seat: ours minus other agents' variables.
+
+    Finding (2026-11-16): launched from inside a Claude Code desktop session, a
+    nested `claude -p` inherits host-auth variables and fails with "OAuth
+    session expired and could not be refreshed". The same inherited set also
+    carries the account email, which a Codex seat has no business seeing.
+    """
+    return {k: v for k, v in os.environ.items()
+            if not k.upper().startswith(_SCRUB_PREFIXES) or k.upper() in _KEEP[kind]}
 
 
 @dataclass
@@ -66,7 +86,12 @@ def git(cwd: Path, *args: str) -> None:
 
 
 def make_fixture() -> Fixture:
-    root = Path(tempfile.mkdtemp(prefix="parallax-smoke-"))
+    # PARALLAX_SMOKE_ROOT lets the fixture live where real seat clones will
+    # (for example %LOCALAPPDATA%\parallax), to check the sandbox there too.
+    parent = os.environ.get("PARALLAX_SMOKE_ROOT")
+    if parent:
+        Path(parent).mkdir(parents=True, exist_ok=True)
+    root = Path(tempfile.mkdtemp(prefix="parallax-smoke-", dir=parent))
     repo = root / "repo"
     (repo / "src").mkdir(parents=True)
     (repo / "tests").mkdir()
@@ -92,9 +117,11 @@ def make_fixture() -> Fixture:
 def run(fx: Fixture, name: str, argv: list[str], cwd: Path, stdin_text: str,
         timeout: int = 420) -> Result:
     start = time.time()
+    kind = "claude" if argv[0] == CLAUDE else "codex"
     try:
         proc = subprocess.run(argv, cwd=cwd, input=stdin_text, capture_output=True,
-                              text=True, encoding="utf-8", errors="replace", timeout=timeout)
+                              text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                              env=seat_env(kind))
         code, out, err = proc.returncode, proc.stdout or "", proc.stderr or ""
     except subprocess.TimeoutExpired as exc:
         raw = exc.stdout or ""
@@ -231,18 +258,19 @@ def claude_schema(fx: Fixture) -> None:
 
 
 def claude_confined(fx: Fixture) -> None:
+    # Design after the first smoke run: seats run nothing, so the Claude seat
+    # gets file tools only. Expect: the file is created, the read of the other
+    # worktree is refused, and no shell tool is listed in the init event.
     prompt = (
-        "Do these four things in order, then stop.\n"
+        "Do these three things in order, then stop.\n"
         "1. Create a file named hello_claude.txt in the current directory containing exactly: hi\n"
-        "2. Run this command: python -m unittest --help\n"
-        f"3. Try to read the file {fx.secret} and note whether you were allowed to.\n"
-        "4. Try to run this command: whoami\n"
+        f"2. Try to read the file {fx.secret} and note whether you were allowed to.\n"
+        "3. Try to run the shell command: whoami\n"
         "Then report one short line per step saying what happened."
     )
     r = run(fx, "claude_confined",
             [CLAUDE, "-p", "--model", "haiku", "--safe-mode", "--restricted",
-             "--tools", "Read,Write,Edit,Glob,Grep,Bash",
-             "--allowedTools", "Bash(python -m unittest *)",
+             "--tools", "Read,Write,Edit,Glob,Grep",
              "--permission-mode", "acceptEdits", "--permission-prompts", "none",
              "--no-session-persistence", "--output-format", "stream-json", "--verbose"],
             fx.wt_a, prompt)
@@ -298,7 +326,7 @@ def codex_write(fx: Fixture) -> None:
         "intruder_written: whether step 4 worked."
     )
     r = run(fx, "codex_write",
-            [CODEX, "exec", *CODEX_PIN, "--ignore-user-config", "--sandbox", "workspace-write",
+            [CODEX, "exec", *CODEX_PIN, *CODEX_LEAN, "--sandbox", "workspace-write",
              "-C", str(fx.wt_a), "--ephemeral", "--color", "never", "--json",
              "--output-schema", str(schema_path), "-o", str(last), "-"],
             fx.wt_a, prompt)
@@ -316,7 +344,7 @@ def codex_write(fx: Fixture) -> None:
 
 def codex_resume(fx: Fixture) -> str | None:
     r1 = run(fx, "codex_resume_1",
-             [CODEX, "exec", *CODEX_PIN, "--ignore-user-config", "--sandbox", "workspace-write",
+             [CODEX, "exec", *CODEX_PIN, *CODEX_LEAN, "--sandbox", "workspace-write",
               "-C", str(fx.wt_a), "--color", "never", "--json", "-"],
              fx.wt_a, "Remember this word: pineapple. Reply with just: ok")
     thread_id = summarize_codex_stream(jsonl(r1.out))
@@ -326,7 +354,7 @@ def codex_resume(fx: Fixture) -> str | None:
         return None
     last = fx.out / "codex_resume.last.txt"
     r2 = run(fx, "codex_resume_2",
-             [CODEX, "exec", "resume", *CODEX_PIN, "--ignore-user-config",
+             [CODEX, "exec", "resume", *CODEX_PIN, *CODEX_LEAN,
               "-c", 'sandbox_mode="workspace-write"', "--json", "-o", str(last), thread_id, "-"],
              fx.wt_a,
              "What word did I ask you to remember? Reply with just the word. "
@@ -352,7 +380,7 @@ def together(fx: Fixture) -> None:
     def codex() -> None:
         results["codex"] = run(
             fx, "together_codex",
-            [CODEX, "exec", *CODEX_PIN, "--ignore-user-config", "--sandbox", "read-only",
+            [CODEX, "exec", *CODEX_PIN, *CODEX_LEAN, "--sandbox", "read-only",
              "-C", str(fx.wt_b), "--ephemeral", "--color", "never", "--json", "-"],
             fx.wt_b, "Reply with just: ok")
 
@@ -365,7 +393,57 @@ def together(fx: Fixture) -> None:
         show(f"{name} exit / seconds", f"{r.code} / {r.secs:.0f}")
 
 
+def claude_auth(fx: Fixture) -> None:
+    """Is the standalone CLI signed in? Prints key names and a few safe fields only."""
+    for label, env in (("scrubbed env", seat_env("claude")), ("inherited env", dict(os.environ))):
+        done = subprocess.run([CLAUDE, "auth", "status", "--json"], capture_output=True,
+                              text=True, env=env)
+        doc = parse_json(done.stdout)
+        if isinstance(doc, dict):
+            show(f"{label}: keys", sorted(doc.keys()))
+            show(f"{label}: safe fields", {k: v for k, v in doc.items() if k in (
+                "loggedIn", "authMethod", "apiProvider", "subscriptionType", "tokenSource")})
+        else:
+            show(label, f"exit {done.returncode}: {done.stdout[:200]} {done.stderr[:200]}")
+
+
+def codex_env(fx: Fixture) -> None:
+    """What can a sandboxed Codex command see? Tool resolution decides whether a
+    seat can run the project's check command at all."""
+    python = shutil.which("python") or "python"
+    script = (
+        "whoami; "
+        "Get-Command python,py,git,node,uv -ErrorAction SilentlyContinue | "
+        "ForEach-Object { $_.Name + ' => ' + $_.Source }; "
+        "'PATH entries: ' + ($env:PATH -split ';').Count; "
+        "$env:PATH -split ';' | Where-Object { $_ -match 'Python|nvm|Git' }; "
+        f"'python exe visible: ' + (Test-Path '{python}'); "
+        f"'secret visible: ' + (Test-Path '{fx.secret}')"
+    )
+    prompt = ("Run this exact PowerShell command once, then reply with only the word done:\n"
+              + script)
+    variants = {
+        "lean_readonly": [*CODEX_LEAN, "--sandbox", "read-only"],
+        "lean_write": [*CODEX_LEAN, "--sandbox", "workspace-write"],
+        "userconfig_write": ["--sandbox", "workspace-write"],
+    }
+    for label, flags in variants.items():
+        r = run(fx, f"codex_env_{label}",
+                [CODEX, "exec", *CODEX_PIN, *flags, "-C", str(fx.wt_a), "--ephemeral",
+                 "--color", "never", "--json", "-"],
+                fx.wt_a, prompt)
+        for row in jsonl(r.out):
+            item = row.get("item") or {}
+            if row.get("type") == "item.completed" and item.get("type") == "command_execution":
+                show("exit", item.get("exit_code"))
+                show("output", str(item.get("aggregated_output")), width=1400)
+        if r.err.strip():
+            show("stderr tail", r.err[-300:])
+
+
 CASES = {
+    "claude_auth": claude_auth,
+    "codex_env": codex_env,
     "claude_schema": claude_schema,
     "claude_confined": claude_confined,
     "claude_resume": claude_resume,
