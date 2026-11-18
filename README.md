@@ -62,6 +62,8 @@ A landing commit carries trailers: `Parallax-Task`, `Parallax-Contract`, `Built-
 
 Main never receives a failing check.
 
+Every landed seat change matched its accepted inventory; relevance is not independently reviewed.
+
 ## How the blind is kept
 
 The blind is enforced where each CLI can enforce it and audited everywhere. Seats are treated as fallible, not hostile.

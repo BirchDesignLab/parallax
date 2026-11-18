@@ -38,7 +38,7 @@ class Codex(unittest.TestCase):
         self.assertEqual(Path(self.calls()[0]["cwd"]), self.cwd)
         self.assertLessEqual(set(self.calls()[0]["env"]), {"OPENAI_API_KEY", "CODEX_HOME"})    # nothing of Claude's leaks into the seat
         self.assertTrue(result.ok)
-        self.assertEqual((result.output, result.session), ({"summary": "probed", "blocked": ""}, "01a1e764-ff34-76b3-ba77-7b4c3f751503"))
+        self.assertEqual((result.output, result.session), ({"summary": "probed", "blocked": "", "files": []}, "01a1e764-ff34-76b3-ba77-7b4c3f751503"))
         self.assertEqual(result.usage, {"input": 31830, "cached": 15488, "output": 295})
         self.assertIn("command_execution", result.events)
         for name in ("brief.md", "schema.json", "events.jsonl", "output.json"):

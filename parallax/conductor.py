@@ -21,7 +21,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from parallax import audit, briefs, decisions, folders, gitops, receipt, schemas, scopes
+from parallax import audit, briefs, decisions, delivery, folders, gitops, receipt, schemas, scopes
 from parallax.config import Config, repo_key, state_home
 from parallax.crossing import cross, validate_mutants
 from parallax.decisions import Dispute, Point
@@ -492,7 +492,7 @@ class Conductor:
                 self.say(f"{t.id}: {seat} is blocked at {stage}: {result.output['blocked']}")
                 raise _Stop(Outcome("blocked", t.id, f"{seat} is blocked at {stage}: {result.output['blocked']}"))
             mutants = result.output["mutants"] if role == "builder" else None
-            reasons = self._validate(t, seat, request.cwd, mutants, f"{t.id} {role} {n}")
+            reasons = self._validate(t, seat, request.cwd, mutants, f"{t.id} {role} {n}", result.output["files"])
             if not reasons:
                 break
             reason = "; ".join(reasons)
@@ -506,16 +506,18 @@ class Conductor:
             result, request = self._call(seat, retry, task=t, void=void)
             usage = _add_usage(usage, result.usage)
         self.journal.append("attempt.finished", t.id, n=n, role=role, seat=seat, commit=gitops.rev(request.cwd),
-                            session=result.session, mutants=list(mutants or []), usage=usage)
+                            session=result.session, mutants=list(mutants or []), files=result.output["files"],
+                            usage=usage)
         self.say(f"{t.id}: {seat}'s {stage} {n} finished")
 
     def _validate(self, t: _Task, seat: str, clone: Path, mutants: list[dict] | None, message: str,
-                  scope: Sequence[str] | None = None) -> list[str]:
+                  files: list[dict], scope: Sequence[str] | None = None) -> list[str]:
         """Check a seat's work in its clone; when it passes, move mutants out and snapshot it.
 
         `mutants` is the builder's list to validate, or None when there are none to check
-        (the challenger). Returns the reasons for rejecting the work; empty means it is
-        committed in the clone.
+        (the challenger). `files` is the seat's declared list of everything it has changed since
+        the task began; it must match the net change from the task base to the snapshot.
+        Returns the reasons for rejecting the work; empty means it is committed in the clone.
         """
         if scope is None:
             scope = self.cfg.builder_scope if t.role(seat) == "builder" else self.cfg.challenger_scope
@@ -531,6 +533,14 @@ class Conductor:
         if mutants is not None:
             self._move_mutants(t, clone, mutants)
         gitops.snapshot(clone, message, exclude=[MUTANTS_DIR, SCRATCH_DIR])
+        actual = gitops.delta(clone, t.base, "HEAD")
+        outside = scopes.outside(list(actual), scope)
+        reasons = ([f"you changed files outside your paths: {', '.join(outside)}"] if outside else [])
+        reasons.extend(delivery.check(files, actual))
+        if reasons:
+            if mutants is not None:
+                self._restore_mutants(t, clone, mutants)        # so a retry can keep them
+            return reasons
         if self.cfg.lint:
             lint = run_command(self.cfg.lint, clone, self.cfg.check_timeout, env=_no_bytecode_env())
             # Put the clone back exactly as the snapshot left it: nothing lint writes is ever committed.
@@ -696,7 +706,7 @@ class Conductor:
                 gitops.git(clone, "clean", "-fdq")
             changed = bool(self._changed(clone))
             mutants = output["mutants"] if role == "builder" and changed else None
-            reasons = self._validate(t, seat, clone, mutants, f"{t.id} {role} respond {n}")
+            reasons = self._validate(t, seat, clone, mutants, f"{t.id} {role} respond {n}", output["files"])
             if not reasons:
                 break
             reason = "; ".join(reasons)
@@ -710,7 +720,7 @@ class Conductor:
             usage = _add_usage(usage, result.usage)
         self.journal.append("response.done", t.id, round=n, seat=seat, answers=output["answers"],
                             commit=gitops.rev(request.cwd), usage=usage, mutants=list(mutants or []),
-                            session=result.session, ruling=list(ruled))
+                            session=result.session, ruling=list(ruled), files=output["files"])
         self.say(f"{t.id}: {seat} responded to crossing {n}")
 
     def _response(self, t: _Task, n: int, seat: str, ruled: Sequence[str]) -> dict | None:
@@ -773,7 +783,7 @@ class Conductor:
             return Outcome("dropped", t.id, f"{t.id} was dropped")
         if self._last(t.id, "task.dropped") is None:
             self.journal.append("task.dropped", t.id, reason=ruling["text"])
-        return self._integrate(t, [], {}, f"{t.id}: dropped", status="dropped")
+        return self._integrate(t, [], {}, f"{t.id}: dropped", [], status="dropped")
 
     # Chores
     def _solo(self, t: _Task) -> Outcome:
@@ -792,7 +802,8 @@ class Conductor:
             while True:
                 if result.output["blocked"].strip():
                     raise _Stop(Outcome("blocked", t.id, f"{seat} is blocked at solo: {result.output['blocked']}"))
-                reasons = self._validate(t, seat, request.cwd, None, f"{t.id} solo", scope=("**",))
+                reasons = self._validate(t, seat, request.cwd, None, f"{t.id} solo", result.output["files"],
+                                         scope=("**",))
                 if not reasons:
                     break
                 reason = "; ".join(reasons)
@@ -805,7 +816,8 @@ class Conductor:
                 result, request = self._call(seat, retry, task=t)
                 usage = _add_usage(usage, result.usage)
             self.journal.append("attempt.finished", t.id, n=1, role="builder", seat=seat,
-                                commit=gitops.rev(request.cwd), session=result.session, mutants=[], usage=usage)
+                                commit=gitops.rev(request.cwd), session=result.session, mutants=[],
+                                files=result.output["files"], usage=usage)
         head = self._head(t, seat)
         last = self._last(t.id, "crossing.done")
         if last is None or last["builder"] != head:
@@ -838,7 +850,7 @@ class Conductor:
         message = (f"{t.id}: {_short_title(t.title)}\n\n"
                    + receipt.trailers(t.id, None, self._seat_label(seat), None, integrated["checks"],
                                       integrated["verdict"], integrated["limitations"]))
-        return self._integrate(t, [head], {}, message)
+        return self._integrate(t, [head], {}, message, self._declared(t, [seat]))
 
     # Disputes and evidence
     def _clean(self, t: _Task, done: dict, waived: set[str] | None = None) -> bool:
@@ -947,14 +959,19 @@ class Conductor:
                                       integrated["verdict"], integrated["limitations"]))
         heads = [self._head(t, t.builder), self._head(t, t.challenger)]
         files = {f".parallax/contracts/{t.id}.md": self._contract_text(t)[0]}
-        return self._integrate(t, heads, files, message)
+        return self._integrate(t, heads, files, message, self._declared(t, t.seats))
 
     def _integrate(self, t: _Task, heads: Sequence[str], files: Mapping[str, str], message: str,
-                   status: str = "landed") -> Outcome:
+                   declared: Sequence[str] | None, status: str = "landed") -> Outcome:
         """The landing loop: build the commit on current main in `<task folder>/land`, then advance main.
 
         `heads` are applied in order as `base..head`; `files` are written on top. The ledger
         and PRECEDENTS.md are always written. Task 11's ledger-only drop reuses this with no heads.
+
+        `declared` is every path the seats listed in their accepted `files`; None means the
+        task began before delivery accounting, so the gate is skipped. Nothing is committed unless
+        every staged change (against current main) is declared or is a conductor record, and
+        the commit that results has exactly the tree that was staged.
         """
         park = f"parallax/ready/{t.id}"
         root = self.cfg.root
@@ -977,11 +994,20 @@ class Conductor:
             self._write(land / ".parallax" / "PRECEDENTS.md",
                         decisions.render_precedents(decisions.precedents(self.events())))
             gitops.git(land, "add", "-A")
+            if declared is not None:
+                allowed = {*declared, LEDGER, ".parallax/PRECEDENTS.md", *files}
+                extra = sorted(p for p in gitops.delta(land, expected) if p not in allowed)
+                if extra:
+                    raise _Stop(Outcome("blocked", t.id, "landing would add changes no seat declared: "
+                                                         + ", ".join(extra)))
+            tree = gitops.git(land, "write-tree")
             check = run_command(self.cfg.check, land, self.cfg.check_timeout, env=_no_bytecode_env())
             if check.timed_out or check.code != 0:
                 raise _Stop(Outcome("blocked", t.id, f"the check failed on top of {self.cfg.main}: "
                                                      f"{_tail(check.output, 2000)}"))
             new = gitops.commit_staged(land, message, gitops.identity(root))
+            if gitops.git(land, "rev-parse", f"{new}^{{tree}}") != tree:
+                raise _Stop(Outcome("blocked", t.id, "a commit hook changed the landing commit; main was not moved"))
             try:
                 moved = gitops.advance_main(root, self.cfg.main, land, new, expected, park)
             except gitops.MainMoved:
@@ -1044,15 +1070,32 @@ class Conductor:
                 session = None
         return session
 
-    def _head(self, t: _Task, seat: str) -> str:
-        """The seat's latest accepted commit (attempt.finished, or a later response.done)."""
+    def _head_event(self, t: _Task, seat: str) -> dict:
+        """The seat's latest accepted event (attempt.finished, or a later response.done)."""
         head = None
         for e in self.events(t.id):
             if e.get("seat") == seat and e["type"] in ("attempt.finished", "response.done") and e.get("commit"):
-                head = e["commit"]
+                head = e
         if head is None:
             raise RuntimeError(f"{seat} has no finished attempt in {t.id}")
         return head
+
+    def _head(self, t: _Task, seat: str) -> str:
+        """The seat's latest accepted commit (attempt.finished, or a later response.done)."""
+        return self._head_event(t, seat)["commit"]
+
+    def _files(self, t: _Task, seat: str) -> list[dict] | None:
+        """The accepted `files` list recorded with the seat's head; None when that event has none
+        (the task began before delivery accounting)."""
+        return self._head_event(t, seat).get("files")
+
+    def _declared(self, t: _Task, seats: Sequence[str]) -> list[str] | None:
+        """Every path the given seats declared, or None (with a note) when any seat has no list."""
+        lists = [self._files(t, seat) for seat in seats]
+        if any(rows is None for rows in lists):
+            self.say(f"{t.id}: landing without delivery accounting (the task started before it existed)")
+            return None
+        return sorted({row["path"] for rows in lists for row in rows})
 
     def _mutants(self, t: _Task) -> list[dict]:
         """The builder's latest mutant list (an event with a non-empty `mutants` list wins)."""

@@ -123,18 +123,20 @@ def stub_seats() -> dict[str, Seat]:
     def build(req):
         ruled = _ruled(req)
         if ruled is None:
-            return {"summary": "", "blocked": _CANNOT, "mutants": []}
+            return {"summary": "", "blocked": _CANNOT, "mutants": [], "files": []}
         mutants = _mutants(ruled)
         _write(req.cwd, {_FILE: _clamp(ruled), **{f".parallax-mutants/{n}/{_FILE}": t for n, t in mutants.items()}})
         return {"summary": "built", "blocked": "",
-                "mutants": [{"id": n, "description": n, "files": [_FILE]} for n in mutants]}
+                "mutants": [{"id": n, "description": n, "files": [_FILE]} for n in mutants],
+                "files": [{"path": _FILE, "change": "modify", "purpose": "clamp"}]}
 
     def probe(req):
         ruled = _ruled(req)
         if ruled is None:
-            return {"summary": "", "blocked": _CANNOT}
+            return {"summary": "", "blocked": _CANNOT, "files": []}
         _write(req.cwd, {"tests/test_clamp.py": _PROBES + _REVERSED[ruled]})
-        return {"summary": "probed", "blocked": ""}
+        return {"summary": "probed", "blocked": "",
+                "files": [{"path": "tests/test_clamp.py", "change": "add", "purpose": "probes"}]}
 
     decision = {"question": "What if lo > hi?", "answer": "raise ValueError", "why": "caller error"}
     return {

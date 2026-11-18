@@ -142,7 +142,8 @@ class Chores(unittest.TestCase):
         root = make_project()
         def edit(req):
             (req.cwd / "README.md").write_text("better wording\n", encoding="utf-8")
-            return {"summary": "reworded", "blocked": ""}
+            return {"summary": "reworded", "blocked": "",
+                    "files": [{"path": "README.md", "change": "modify", "purpose": "the wording fix"}]}
         codex, claude = StubSeat("codex", {"solo": [edit]}), StubSeat("claude", {})
         c = kit_conductor(root, codex, claude)
         self.assertEqual(c.run(root / "tasks/docs-001.md").status, "landed")

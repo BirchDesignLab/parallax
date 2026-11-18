@@ -152,6 +152,24 @@ def changed_paths(clone: Path) -> list[str]:
     return list(dict.fromkeys(paths))
 
 
+_CHANGES = {"A": "add", "D": "delete", "M": "modify", "T": "modify"}
+
+
+def delta(repo: Path, base: str, head: str | None = None) -> dict[str, str]:
+    """Net change from `base` to `head` (a commit), or to the index when `head` is None.
+
+    {relative path, forward slashes: "add" | "modify" | "delete"}. A rename is a delete plus an
+    add; a mode-only change is "modify"; a file added and removed again is absent.
+    """
+    args = ["diff", *(["--cached"] if head is None else []), "--name-status", "--no-renames", "-z",
+            base, *([head] if head is not None else []), "--"]
+    out = _raw(Path(repo), *args).decode("utf-8", errors="replace").split("\0")
+    changes: dict[str, str] = {}
+    for i in range(0, len(out) - 1, 2):
+        changes[out[i + 1]] = _CHANGES.get(out[i][:1], "modify")
+    return changes
+
+
 def snapshot(clone: Path, message: str, exclude: Sequence[str] = ()) -> str | None:
     """Commit everything in `clone` except the excluded top-level folders. None when there is nothing to commit."""
     clone = Path(clone)

@@ -17,7 +17,7 @@ class Live(unittest.TestCase):
         gitops.clone_at(make_repo(), clone, "main")
         out = Path(tempfile.mkdtemp(prefix="plx live "))
         first = seat.run(SeatRequest("probe", "Create a file named made.txt whose whole content is the two letters hi, with no punctuation. "
-                                     "Then answer with summary 'done' and blocked ''.",
+                                     "Then answer with summary 'done', blocked '' and files listing made.txt as add with purpose 'test'.",
                                      clone, PROBE, True, None, out / "1"))
         if first.session:
             self.addCleanup(seat.discard, first.session, clone)                 # runs before the folder goes, even on failure

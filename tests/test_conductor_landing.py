@@ -98,7 +98,7 @@ class Rejections(unittest.TestCase):
         self.assertIn("expected 3 mutants, got 2", [e for e in c.events("clamp-001") if e["type"] == "attempt.rejected"][0]["reason"])
 
     def test_seat_reporting_blocked_stops_the_task(self):
-        _, out, _, _ = self.run_with([lambda r: {"summary": "", "blocked": "the contract contradicts itself", "mutants": []}], [probes()])
+        _, out, _, _ = self.run_with([lambda r: {"summary": "", "blocked": "the contract contradicts itself", "mutants": [], "files": []}], [probes()])
         self.assertEqual(out.status, "blocked"); self.assertIn("the contract contradicts itself", out.detail)
 
 class BlindAndResume(unittest.TestCase):
@@ -109,7 +109,7 @@ class BlindAndResume(unittest.TestCase):
         def peeking(req):
             builds()(req)
             other = [e["path"] for e in c.events("clamp-001") if e["type"] == "checkout.created" and e["seat"] == "claude"][0]
-            return SeatResult({"summary": "", "blocked": "", "mutants": []}, req.session,
+            return SeatResult({"summary": "", "blocked": "", "mutants": [], "files": []}, req.session,
                               "dir " + other.replace("\\", "/") + "/tests", {"input": 0, "cached": 0, "output": 0})
         codex.script["build"] = [peeking, builds()]
         self.assertEqual(c.run(root / TASK).status, "landed")

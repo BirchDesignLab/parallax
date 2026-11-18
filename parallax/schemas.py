@@ -11,15 +11,16 @@ def _list(item):
 
 
 _S, _B, _I = {"type": "string"}, {"type": "boolean"}, {"type": "integer"}
+FILES = _list(_obj(path=_S, change={"type": "string", "enum": ["add", "modify", "delete"]}, purpose=_S))
 _MUTANTS = _list(_obj(id=_S, description=_S, files=_list(_S)))
 
 READING = _obj(interface=_S, decisions=_list(_obj(question=_S, answer=_S, why=_S)), predicted_failures=_list(_S))
 REVEAL = _obj(interface_ok=_B, interface_objection=_S, verdicts=_list(_obj(index=_I, agree=_B, counter=_S, why=_S)))
-BUILD = _obj(summary=_S, blocked=_S, mutants=_MUTANTS)
-PROBE = _obj(summary=_S, blocked=_S)
+BUILD = _obj(summary=_S, blocked=_S, mutants=_MUTANTS, files=FILES)
+PROBE = _obj(summary=_S, blocked=_S, files=FILES)
 SOLO = PROBE
 RESPOND = _obj(answers=_list(_obj(dispute=_S, stance={"type": "string", "enum": ["concede", "contest"]}, cite=_S, why=_S)),
-               blocked=_S, mutants=_MUTANTS)
+               blocked=_S, mutants=_MUTANTS, files=FILES)
 
 
 def validate(value, schema: dict) -> list[str]:

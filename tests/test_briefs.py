@@ -54,6 +54,27 @@ class Briefs(unittest.TestCase):
             self.assertIn(part, text)
         self.assertIn("Write only under: tests/**", briefs.respond("challenger", CONTRACT, EVIDENCE, self.cfg))
 
+    def test_reading_says_what_lands_for_either_role_even_with_no_mutants(self):
+        no_mutants = load_config(project(SAMPLE_TOML.replace("mutants = 3", "mutants = 0")))
+        self.assertEqual(no_mutants.mutants, 0)
+        for cfg in (self.cfg, no_mutants):
+            for role in briefs.ROLES:
+                text = briefs.reading("Add clamp.", role, cfg, [])
+                for part in (".parallax-mutants/", ".parallax-scratch/", "never land", "## What lands"):
+                    self.assertIn(part, text, (role, cfg.mutants, part))
+
+    def test_writing_briefs_ask_for_the_files_list(self):
+        for name in ("build", "probe", "respond", "solo"):
+            self.assertIn("`files` (list)", self.all[name], name)
+            self.assertIn("## What lands", self.all[name], name)
+        self.assertIn("repeat your full list unchanged", self.all["respond"])
+        for name in ("build", "probe", "solo", "reading"):
+            self.assertNotIn("repeat your full list unchanged", self.all[name], name)
+
+    def test_only_the_challenger_is_asked_to_object_to_files_that_should_not_land(self):
+        self.assertIn("should not be on main", briefs.reveal("challenger", OTHER))
+        self.assertNotIn("should not be on main", briefs.reveal("builder", OTHER))
+
     def test_retry_names_the_reason(self):
         self.assertIn("tests/sneaky.py", self.all["retry"])
 
@@ -68,6 +89,6 @@ class Briefs(unittest.TestCase):
                  briefs.retry("lint failed: *** Error compiling 'D:\\plx\\codex-1a2b3c4d\\src\\a.py'")]
         for text in texts:
             self.assertIsNone(ABSOLUTE.search(text), text)
-            self.assertNotIn(".parallax", text.replace(".parallax-mutants", ""))
+            self.assertNotIn(".parallax", text.replace(".parallax-mutants", "").replace(".parallax-scratch", ""))
         self.assertIn('File "<outside>/test_clamp.py", line 9', texts[0])
         self.assertIn("https://example.com/a", briefs.solo("See https://example.com/a", self.cfg))

@@ -22,7 +22,20 @@ RULES = ("Work only in this folder. Do not look outside it. Do not run git. You 
          "tests here; the conductor runs them and will send you any failure.")
 
 MUTANTS_DIR = ".parallax-mutants"
+SCRATCH_DIR = ".parallax-scratch"
 ROLES = ("builder", "challenger")
+
+WHAT_LANDS = f"""## What lands
+
+Only files that belong in the project after this task land on main. Two folders in this folder are for Parallax's working files and never land: `{MUTANTS_DIR}/<id>/`, where the builder puts its mutants and nowhere else, and `{SCRATCH_DIR}/`, for any scratch notes or scripts. Do not put copies, notes, scripts or output made only to carry out this task anywhere else. Files the task itself calls for, such as fixtures, examples or docs, are deliverables like any other."""
+
+FILES_FIELD = (f"- `files` (list): every file you have changed since this task began, as it now stands against the "
+               f"project's starting point, one entry each with `path` (relative, forward slashes), `change` (`add`, "
+               f"`modify` or `delete`; a rename is a delete and an add) and `purpose` (why it belongs on main). Include "
+               f"changes from your earlier attempts that you kept. Leave out anything you reverted, and leave out "
+               f"`{MUTANTS_DIR}/` and `{SCRATCH_DIR}/`. The conductor compares this list with your actual changes and "
+               f"rejects your work if they differ.")
+
 
 def _block(text: str, lang: str = "") -> str:
     """Fence `text` with more backticks than it contains, so it cannot close the fence early."""
@@ -100,16 +113,17 @@ Do not change any file in this step. Read the task below and the existing code i
 You will be the {role}. Another seat is writing its own reading of the same task at the same time; you will see it afterwards and say where you agree.
 
 How the work will be split once the contract is frozen:
-- The builder implements the change, plus a few deliberately broken copies (mutants). The builder will write only under: {_scope("builder", cfg)}.
+- The builder implements the change, plus a few deliberately broken copies (mutants), which go in `{MUTANTS_DIR}/` and never land. The builder will write only under: {_scope("builder", cfg)}.
 - The challenger writes automated tests (probes) from the contract alone, without seeing the implementation. The challenger will write only under: {_scope("challenger", cfg)}.
 - The contract is made from the points both readings agree on, plus the human's rulings where they differ. Anything the contract leaves open is a place where the two sides can disagree later, so be thorough now.""",
         "## The task\n\n" + _block(task_text),
         _precedents(precedents),
+        WHAT_LANDS,
         """## What to return
 
 Reply with JSON that has exactly these fields:
 
-- `interface` (string): the exact interface you expect: every file to create or change, and every public name in it with its full signature, parameters, return value and errors raised. Use paths relative to this folder.
+- `interface` (string): the exact interface you expect: every file to create, change or delete on main (not Parallax's working files), and every public name in it with its full signature, parameters, return value and errors raised. Use paths relative to this folder.
 - `decisions` (list): one entry for each question the task leaves open (edge cases, error handling, types, naming, behavior at limits). Each entry has `question` (the question, stated on its own so it reads clearly out of context), `answer` (what the code should do, written so it could go straight into a contract) and `why` (your reason, citing any precedent id you applied). If the task is fully clear, return an empty list.
 - `predicted_failures` (list of strings): where an implementation is most likely to go wrong, one item per risk, each concrete enough to write a test for.""",
     )
@@ -130,7 +144,8 @@ def reveal(own_role: str, other_reading: dict) -> str:
         interface = ("The builder's interface stands unless you object. Set `interface_ok` to true to accept it. "
                      "To object, set `interface_ok` to false and put in `interface_objection` the exact change you "
                      "want, in one or two sentences: if the human agrees, it is added to the interface as written. "
-                     "Object only when the interface is wrong or ambiguous, not over style.")
+                     "Object only when the interface is wrong or ambiguous, not over style. Also object if the interface "
+                     "names a file that should not be on main, such as a working copy, scratch file or mutant code.")
     else:
         interface = ("You are the builder, so your own interface stands. Set `interface_ok` to true and "
                      "`interface_objection` to an empty string.")
@@ -165,10 +180,11 @@ def build(contract: str, cfg: Config) -> str:
 
 You are the builder. Implement the contract below exactly.
 
-Write only under: {_scope("builder", cfg)}. The one exception is the mutant folder `{MUTANTS_DIR}/` described below.
+Write only under: {_scope("builder", cfg)}. The exceptions are the two working folders described under What lands: `{MUTANTS_DIR}/` for your mutants and `{SCRATCH_DIR}/` for scratch.
 
 Do not write tests. The challenger is writing tests from the same contract, separately; you will not see them. Afterwards the conductor combines your change with those tests and runs the project's check, then runs the tests against each of your mutants.""",
         "## The contract\n\n" + _block(contract),
+        WHAT_LANDS,
         _mutant_steps(cfg.mutants),
         """## What to return
 
@@ -176,7 +192,8 @@ Reply with JSON that has exactly these fields:
 
 - `summary` (string): what you changed, file by file, in a few sentences.
 - `blocked` (string): empty when you finished. If the contract cannot be implemented as written, say exactly why here and change as little as possible.
-- `mutants` (list): one entry per mutant, each with `id` (its folder name, such as m1), `description` (what behavior it breaks and which contract point forbids that) and `files` (the relative paths it changes, with forward slashes and without the `""" + MUTANTS_DIR + """/<id>/` prefix, such as `src/pkg/core.py`).""",
+- `mutants` (list): one entry per mutant, each with `id` (its folder name, such as m1), `description` (what behavior it breaks and which contract point forbids that) and `files` (the relative paths it changes, with forward slashes and without the `""" + MUTANTS_DIR + """/<id>/` prefix, such as `src/pkg/core.py`).
+""" + FILES_FIELD,
     )
 
 
@@ -189,10 +206,11 @@ def probe(contract: str, cfg: Config) -> str:
 
 You are the challenger. Write automated tests (probes) for the contract below, working from the contract alone.
 
-Write only under: {_scope("challenger", cfg)}.
+Write only under: {_scope("challenger", cfg)}, plus `{SCRATCH_DIR}/` for scratch.
 
 The implementation is not in this folder. Do not write it. Do not write a stand-in, fake or copy of it either; import it by the names and paths the contract gives, as if it were already there.""",
         "## The contract\n\n" + _block(contract),
+        WHAT_LANDS,
         f"""## How to write the probes
 
 - Cover every point of the contract: each part of the interface and each decision, including the edge cases and errors it names.
@@ -204,7 +222,8 @@ The implementation is not in this folder. Do not write it. Do not write a stand-
 Reply with JSON that has exactly these fields:
 
 - `summary` (string): the probes you wrote, file by file, and which contract points each covers.
-- `blocked` (string): empty when you finished. If the contract is too unclear to test at some point, say exactly where here.""",
+- `blocked` (string): empty when you finished. If the contract is too unclear to test at some point, say exactly where here.
+""" + FILES_FIELD,
     )
 
 
@@ -259,18 +278,20 @@ If you contest every dispute, change nothing at all: any change you make is disc
 
 You are the {role}. Your work and the {other}'s work were combined and checked against the contract below. The problems found are listed under their dispute ids.
 
-Write only under: {_scope(role, cfg)}.""",
+Write only under: {_scope(role, cfg)}, plus the working folders described under What lands.""",
         "## The contract\n\n" + _block(contract),
         "## The evidence\n\n" + "\n\n".join(items),
         decide,
         mutants,
+        WHAT_LANDS,
         """## What to return
 
 Reply with JSON that has exactly these fields:
 
 - `answers` (list): one entry per dispute id, each with `dispute` (the id), `stance` (`concede` or `contest`), `cite` (the contract line or ruling you rely on) and `why` (your reason, and what you changed if anything).
 - `blocked` (string): empty when you finished; otherwise exactly what stops you.
-- `mutants` (list): as described under Mutants, each entry with `id`, `description` and `files` (relative paths without the mutant folder prefix).""",
+- `mutants` (list): as described under Mutants, each entry with `id`, `description` and `files` (relative paths without the mutant folder prefix).
+""" + FILES_FIELD + " If you contest every dispute, repeat your full list unchanged.",
     )
 
 
@@ -285,12 +306,14 @@ Do the task below. It is a chore that should not change the project's behavior, 
 
 When you finish, the conductor runs the project's check command, `{cfg.check}`, and it must still pass. Keep existing behavior and tests intact.""",
         "## The task\n\n" + _block(task_text),
+        WHAT_LANDS,
         """## What to return
 
 Reply with JSON that has exactly these fields:
 
 - `summary` (string): what you changed, file by file.
-- `blocked` (string): empty when you finished; otherwise exactly what stops you.""",
+- `blocked` (string): empty when you finished; otherwise exactly what stops you.
+""" + FILES_FIELD,
     )
 
 

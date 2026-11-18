@@ -18,9 +18,9 @@ print(json.dumps({"type": "system", "subtype": "init", "cwd": os.getcwd(), "mode
 print(json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Write", "input": {"file_path": "tests/test_clamp.py"}}]}}))
 result = {"type": "result", "subtype": "success", "is_error": False, "session_id": session, "usage": usage, "num_turns": 2}
 if mode == "ok":
-    result.update(result="done", structured_output={"summary": "probed", "blocked": ""})
+    result.update(result="done", structured_output={"summary": "probed", "blocked": "", "files": []})
 elif mode == "text_json":
-    result.update(result='{"summary": "probed", "blocked": ""}')
+    result.update(result='{"summary": "probed", "blocked": "", "files": []}')
 elif mode == "wrong_shape":
     result.update(result="done", structured_output={"summary": "probed"})
 elif mode == "auth":

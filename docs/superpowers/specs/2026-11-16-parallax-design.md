@@ -107,6 +107,7 @@ Seats never message each other. Everything a seat learns about the other side ar
 - Each role has path patterns in the project config, for example builder `src/**`, challenger `tests/**`. Files both would need (lockfiles, manifests) are listed as exclusive and belong to the builder for that task.
 - Seats only edit files. The conductor does all git work: it checks every changed path against the seat's patterns, rejects the attempt if any falls outside, and makes the commits itself.
 - The conductor also runs every check. Seats are not relied on to run project tools: on this machine Codex's sandbox cannot execute Python at all. A project may name a quick `lint` command, which the conductor runs on a seat's worktree after each attempt; a failure goes straight back to that seat and does not use up a repair round.
+- Every seat call that writes returns the full list of files it has changed since the task began. The conductor rejects work whose actual changes differ, and before landing checks that only declared files and its own records are staged, and that no commit hook changed the commit. Every landed seat change matched its accepted inventory; relevance is not independently reviewed.
 - **Ruling:** a seat edits and runs commands inside its own worktree without asking. How each seat is confined is described under "Keeping the blind honest".
 
 ### Disputes

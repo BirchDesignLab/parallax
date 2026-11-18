@@ -37,7 +37,7 @@ class Claude(unittest.TestCase):
         self.assertEqual((self.calls()[0]["stdin"], Path(self.calls()[0]["cwd"])), ("the brief", self.cwd))
         self.assertLessEqual(set(self.calls()[0]["env"]), {"ANTHROPIC_API_KEY"})             # the host-auth variables are gone
         self.assertTrue(result.ok)
-        self.assertEqual((result.output, result.session), ({"summary": "probed", "blocked": ""}, new_id))
+        self.assertEqual((result.output, result.session), ({"summary": "probed", "blocked": "", "files": []}, new_id))
         self.assertEqual(result.usage, {"input": 9312, "cached": 9000, "output": 45})
         self.assertIn("tool_use", result.events)
         self.assertEqual((self.seat.name, self.seat.model, self.seat.effort), ("claude", "fable", "high"))
@@ -51,7 +51,7 @@ class Claude(unittest.TestCase):
 
     def test_output_may_arrive_as_text(self):
         os.environ["FAKE_CLAUDE_MODE"] = "text_json"
-        self.assertEqual(self.seat.run(self.request()).output, {"summary": "probed", "blocked": ""})
+        self.assertEqual(self.seat.run(self.request()).output, {"summary": "probed", "blocked": "", "files": []})
 
     def test_failures_are_reported_not_raised(self):
         for mode, needle in (("auth", "Failed to authenticate"), ("no_result", "claude exited 1"), ("wrong_shape", "blocked")):

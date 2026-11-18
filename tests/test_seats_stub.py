@@ -13,7 +13,7 @@ def request(stage="probe", session=None, cwd=None):
 
 class Stub(unittest.TestCase):
     def test_replays_steps_in_order_and_records_calls(self):
-        seat = StubSeat("codex", {"probe": [lambda r: {"summary": "one", "blocked": ""}, lambda r: {"summary": "two", "blocked": ""}]})
+        seat = StubSeat("codex", {"probe": [lambda r: {"summary": "one", "blocked": "", "files": []}, lambda r: {"summary": "two", "blocked": "", "files": []}]})
         first, second = seat.run(request()), seat.run(request())
         self.assertEqual((first.output["summary"], second.output["summary"]), ("one", "two"))
         self.assertTrue(first.ok)
@@ -22,7 +22,7 @@ class Stub(unittest.TestCase):
             seat.run(request())
 
     def test_sessions(self):
-        seat = StubSeat("codex", {"probe": [lambda r: {"summary": "", "blocked": ""}] * 3})
+        seat = StubSeat("codex", {"probe": [lambda r: {"summary": "", "blocked": "", "files": []}] * 3})
         a = seat.run(request())
         b = seat.run(request(session=a.session))
         c = seat.run(request())
@@ -36,7 +36,7 @@ class Stub(unittest.TestCase):
     def test_a_step_can_edit_files_and_return_a_whole_result(self):
         def step(req):
             (req.cwd / "made.txt").write_text("x", encoding="utf-8")
-            return SeatResult({"summary": "s", "blocked": ""}, "custom", "EVENTS", {"input": 1, "cached": 0, "output": 2})
+            return SeatResult({"summary": "s", "blocked": "", "files": []}, "custom", "EVENTS", {"input": 1, "cached": 0, "output": 2})
         req = request()
         result = StubSeat("claude", {"probe": [step]}).run(req)
         self.assertTrue((req.cwd / "made.txt").exists())

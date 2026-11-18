@@ -22,7 +22,7 @@ print(json.dumps({"type": "thread.started", "thread_id": "01a1e764-ff34-76b3-ba7
 print(json.dumps({"type": "turn.started"}))
 print(json.dumps({"type": "item.completed", "item": {"id": "item_0", "type": "command_execution", "command": "powershell.exe -Command dir",
                                                        "aggregated_output": "ok", "exit_code": 0, "status": "completed"}}))
-last = {"ok": '{"summary": "probed", "blocked": ""}', "launch_failure": '{"summary": "probed", "blocked": ""}',
+last = {"ok": '{"summary": "probed", "blocked": "", "files": []}', "launch_failure": '{"summary": "probed", "blocked": "", "files": []}',
         "not_json": "I could not do that.", "wrong_shape": '{"summary": "probed"}'}[mode]
 print(json.dumps({"type": "item.completed", "item": {"id": "item_1", "type": "agent_message", "text": last}}))
 print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 31830, "cached_input_tokens": 15488, "cache_write_input_tokens": 0,
