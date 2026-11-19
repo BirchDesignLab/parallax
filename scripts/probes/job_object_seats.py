@@ -53,7 +53,7 @@ def main() -> int:
         seat = task / "seat"
         gitops.clone_at(repo, seat, "HEAD")
 
-        r = run_command([codex, "exec", "-m", "gpt-6-astra", "-c", 'model_reasoning_effort="low"',
+        r = run_command([codex, "exec", "-m", "gpt-6.2-astra", "-c", 'model_reasoning_effort="low"',
                          "--ignore-user-config", "-c", 'windows.sandbox="elevated"',
                          "--sandbox", "workspace-write", "-C", str(seat), "--ephemeral",
                          "--color", "never", "--json", "-"],

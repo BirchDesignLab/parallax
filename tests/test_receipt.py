@@ -19,13 +19,13 @@ class Receipt(unittest.TestCase):
 
     def test_trailers_match_the_spec_sample(self):
         self.assertEqual(
-            trailers("clamp-001", "sha256:9f2c", "codex gpt-6-astra/xhigh", "claude fable/high",
+            trailers("clamp-001", "sha256:9f2c", "codex gpt-6.2-astra/xhigh", "claude fable/high",
                      "14 probes passed, 3 of 3 mutants caught", "consensus", []),
-            "Parallax-Task: clamp-001\nParallax-Contract: sha256:9f2c\nBuilt-by: codex gpt-6-astra/xhigh\n"
+            "Parallax-Task: clamp-001\nParallax-Contract: sha256:9f2c\nBuilt-by: codex gpt-6.2-astra/xhigh\n"
             "Challenged-by: claude fable/high\nChecks: 14 probes passed, 3 of 3 mutants caught\nVerdict: consensus")
 
     def test_solo_and_limitations(self):
-        self.assertEqual(trailers("docs-1", None, "codex gpt-6-astra/xhigh", None, "check passed", "solo", []),
-                         "Parallax-Task: docs-1\nBuilt-by: codex gpt-6-astra/xhigh\nChecks: check passed\nVerdict: solo")
+        self.assertEqual(trailers("docs-1", None, "codex gpt-6.2-astra/xhigh", None, "check passed", "solo", []),
+                         "Parallax-Task: docs-1\nBuilt-by: codex gpt-6.2-astra/xhigh\nChecks: check passed\nVerdict: solo")
         self.assertTrue(trailers("t", "sha256:0", "a", "b", "c", "limited", ["NaN is not supported", "mutant m2 waived"])
                         .endswith("Verdict: limited\nLimitation: NaN is not supported\nLimitation: mutant m2 waived"))

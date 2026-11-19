@@ -24,7 +24,7 @@ The one exception is by design, not scratch: Parallax's runtime state home is `~
 
 Work runs in rounds of plan tasks that do not depend on each other, with disjoint file ownership (no worktrees).
 
-- **Codex:** the developer pastes briefs written to `docs/briefs/codex-task-<n>.md` into their Codex app. Present each brief in chat as a copy-paste block too. Recommend `gpt-6-astra` at `high` (developer ruling: design-grade Codex work is astra high or xhigh).
+- **Codex:** the developer pastes briefs written to `docs/briefs/codex-task-<n>.md` into their Codex app. Present each brief in chat as a copy-paste block too. Recommend `gpt-6.2-astra` at `high` (developer ruling: design-grade Codex work is astra high or xhigh).
   - Codex's app runs in its default sandbox, as a separate Windows user: local `git clone` fails there and `folders.is_private` sees a different account, so any test that clones (gitops, crossing, conductor) fails for Codex though it passes for us. Every brief tells Codex: if tests fail with sandbox clone or permission errors, ask for elevated access and rerun them, rather than reporting the failures.
   - Developer ruling 2026-11-17: keep the default sandbox with per-command escalation for now; switching Codex to Full access (machine-wide, no prompts) is on the table if the escalation prompts get annoying.
   - Tasks whose tests Codex cannot run go to a Claude subagent instead (Task 9 did).

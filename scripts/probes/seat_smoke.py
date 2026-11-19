@@ -57,7 +57,7 @@ from pathlib import Path
 
 CLAUDE = shutil.which("claude")
 CODEX = shutil.which("codex")
-CODEX_PIN = ["-m", "gpt-6-astra", "-c", 'model_reasoning_effort="low"']
+CODEX_PIN = ["-m", "gpt-6.2-astra", "-c", 'model_reasoning_effort="low"']
 # Finding (2026-11-16): --ignore-user-config alone drops `[windows] sandbox =
 # "elevated"`, after which every command is "rejected: blocked by policy".
 # Re-supplying that one key keeps the seat lean and able to run commands.

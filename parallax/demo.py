@@ -65,7 +65,7 @@ def _toml(stub: bool) -> str:
     return (f"[project]\ncheck = '\"{sys.executable}\" -m unittest discover -s tests -t .'\n"
             f"lint = '\"{sys.executable}\" -m compileall -q .'\n"
             '[scopes]\nbuilder = ["clamplib/**"]\nchallenger = ["tests/**"]\n'
-            f'[seats.codex]\n{adapter}model = "gpt-6-astra"\neffort = "xhigh"\n'
+            f'[seats.codex]\n{adapter}model = "gpt-6.2-astra"\neffort = "xhigh"\n'
             f'[seats.claude]\n{adapter}model = "fable"\neffort = "high"\n')
 
 
@@ -141,7 +141,7 @@ def stub_seats() -> dict[str, Seat]:
     decision = {"question": "What if lo > hi?", "answer": "raise ValueError", "why": "caller error"}
     return {
         "codex": StubSeat("codex", {"reading": [reading(decision)], "reveal": [reveal()], "build": [build]},
-                          model="gpt-6-astra", effort="xhigh"),
+                          model="gpt-6.2-astra", effort="xhigh"),
         "claude": StubSeat("claude", {"reading": [reading()], "reveal": [reveal((False, _COUNTER))],
                                       "probe": [probe]}, model="fable", effort="high"),
     }

@@ -25,7 +25,7 @@ max_repair_rounds = 2
 mutants = 3
 
 [seats.codex]
-model  = "gpt-6-astra"
+model  = "gpt-6.2-astra"
 effort = "xhigh"
 
 [seats.claude]

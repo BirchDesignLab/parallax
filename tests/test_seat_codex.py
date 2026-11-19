@@ -14,7 +14,7 @@ class Codex(unittest.TestCase):
         self.cfg = load_config(project(SAMPLE_TOML))
         self.tmp = Path(tempfile.mkdtemp(prefix="plx codex "))
         self.home = self.tmp / "codex home"; self.home.mkdir()
-        (self.home / "config.toml").write_text('model = "gpt-6-astra"\n[windows]\nsandbox = "elevated"\n', encoding="utf-8")
+        (self.home / "config.toml").write_text('model = "gpt-6.2-astra"\n[windows]\nsandbox = "elevated"\n', encoding="utf-8")
         self.cwd = self.tmp / "seat clone"; self.cwd.mkdir()
         os.environ["FAKE_CODEX_RECORD"] = str(self.tmp / "record.json")
         os.environ["CLAUDE_CODE_USER_EMAIL"] = "someone@example.invalid"
@@ -31,7 +31,7 @@ class Codex(unittest.TestCase):
         result = self.seat.run(self.request())
         out = str(self.tmp / "out dir")
         self.assertEqual(self.calls()[0]["argv"], [
-            "exec", "-m", "gpt-6-astra", "-c", 'model_reasoning_effort="xhigh"', "--ignore-user-config",
+            "exec", "-m", "gpt-6.2-astra", "-c", 'model_reasoning_effort="xhigh"', "--ignore-user-config",
             "-c", 'windows.sandbox="elevated"', "--sandbox", "workspace-write", "-C", str(self.cwd), "--color", "never", "--json",
             "--output-schema", os.path.join(out, "schema.json"), "-o", os.path.join(out, "last.json"), "-"])
         self.assertEqual(self.calls()[0]["stdin"], "the brief")
@@ -43,7 +43,7 @@ class Codex(unittest.TestCase):
         self.assertIn("command_execution", result.events)
         for name in ("brief.md", "schema.json", "events.jsonl", "output.json"):
             self.assertTrue((self.tmp / "out dir" / name).exists(), name)
-        self.assertEqual((self.seat.name, self.seat.model, self.seat.effort), ("codex", "gpt-6-astra", "xhigh"))
+        self.assertEqual((self.seat.name, self.seat.model, self.seat.effort), ("codex", "gpt-6.2-astra", "xhigh"))
 
     def test_read_only_and_resume(self):
         self.seat.run(self.request(writable=False))
@@ -80,7 +80,7 @@ class Codex(unittest.TestCase):
 
     def test_discard_forgets_the_folder_codex_recorded_and_nothing_else(self):
         config = self.home / "config.toml"
-        keep = ('model = "gpt-6-astra"\n\n[windows]\nsandbox = "elevated"\n\n'
+        keep = ('model = "gpt-6.2-astra"\n\n[windows]\nsandbox = "elevated"\n\n'
                 "[projects.'c:\\git\\a real project']\ntrust_level = \"trusted\"\n")
         mine = f"\n[projects.'{str(self.cwd).lower()}']\ntrust_level = \"trusted\"\n"
         config.write_text(keep + mine, encoding="utf-8")

@@ -47,6 +47,7 @@ Ways this could run and still be a failure:
 - Seats run headless: `codex exec` and `claude -p`. Neither can stop to ask permission.
 - Codex's sandbox limits where an agent writes, not what it reads. The operating system cannot keep one agent from reading the other's work, so blindness has to be arranged and audited (see "Keeping the blind honest").
 - **Ruling:** design-grade Codex work runs on `gpt-6-astra` at high or xhigh. ("if it wasn't astra high or extra high it's probably not good")
+- **Ruling (2026-11-19):** the Codex seat moves to `gpt-6.2-astra`, the current astra. The astra high-or-xhigh rule above still holds.
 
 ## Approaches considered
 
@@ -133,7 +134,7 @@ Trailers on the integration commit:
 
     Parallax-Task: clamp-001
     Parallax-Contract: sha256:9f2c...
-    Built-by: codex gpt-6-astra/xhigh
+    Built-by: codex gpt-6.2-astra/xhigh
     Challenged-by: claude fable/high
     Checks: 14 probes passed, 3 of 3 mutants caught
     Verdict: consensus
@@ -175,7 +176,7 @@ A third adapter, `stub`, replays scripted outputs. The conductor's own tests use
     mutants = 3
 
     [seats.codex]
-    model  = "gpt-6-astra"
+    model  = "gpt-6.2-astra"
     effort = "xhigh"
 
     [seats.claude]

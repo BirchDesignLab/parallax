@@ -20,7 +20,7 @@ class LoadConfig(unittest.TestCase):
         self.assertEqual(cfg.challenger_scope, ("tests/**",))
         self.assertEqual((cfg.merge, cfg.pair, cfg.max_repair_rounds, cfg.mutants), ("auto", "behavior", 2, 3))
         self.assertEqual([(s.name, s.adapter, s.model, s.effort) for s in cfg.seats],
-                         [("codex", "codex", "gpt-6-astra", "xhigh"), ("claude", "claude", "fable", "high")])
+                         [("codex", "codex", "gpt-6.2-astra", "xhigh"), ("claude", "claude", "fable", "high")])
 
     def test_defaults(self):
         cfg = load_config(project(MINIMAL))

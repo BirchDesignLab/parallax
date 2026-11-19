@@ -12,7 +12,7 @@ class Demo(unittest.TestCase):
         self.assertEqual(call("rule", "D-clamp-001-1", "a", "--repo", str(where))[0], 0)
         code, out, _ = call("demo", "--dir", str(where), "--stub")
         self.assertEqual(code, 0)
-        for part in ("clamp-001: landed", "Built-by: codex gpt-6-astra/xhigh", "Challenged-by: claude fable/high", "Verdict: ruled"):
+        for part in ("clamp-001: landed", "Built-by: codex gpt-6.2-astra/xhigh", "Challenged-by: claude fable/high", "Verdict: ruled"):
             self.assertIn(part, out)
         self.assertEqual(run_git(where, "status", "--porcelain"), "")
         self.assertIn("def clamp", (where / "clamplib/__init__.py").read_text(encoding="utf-8"))
