@@ -1,6 +1,6 @@
 import unittest
 from parallax.decisions import (Dispute, Point, default_scope, precedents, render_card, render_contract,
-                                render_precedents, ruling_text, settle, witness_problem)
+                                interface_problem, render_precedents, ruling_text, settle, witness_problem)
 
 READINGS = {
     "codex": {"interface": "clamplib.clamp(x, lo, hi)", "predicted_failures": [],
@@ -18,6 +18,20 @@ REVEALS = {
 }
 
 class Settle(unittest.TestCase):
+    def test_a_whole_objection_offers_the_replacement_and_says_why(self):
+        reveals = {**REVEALS, "claude": {**REVEALS["claude"], "interface_ok": False,
+                                         "interface_objection": " name them lo and hi ",
+                                         "interface_replacement": "clamplib.clamp(x, lo, hi) -> number\n"}}
+        d = settle("clamp-001", "codex", "claude", READINGS, reveals)[2][-1]
+        self.assertEqual((d.kind, d.a, d.b), ("interface", "clamplib.clamp(x, lo, hi)", "clamplib.clamp(x, lo, hi) -> number"))
+        self.assertEqual(d.evidence, "Why claude objects: name them lo and hi\n"
+                                     "b and other replace the whole interface; for other, give the complete interface with --note.")
+
+    def test_an_objection_without_a_replacement_key_stays_a_delta(self):
+        reveals = {**REVEALS, "claude": {**REVEALS["claude"], "interface_ok": False, "interface_objection": "name them lo and hi"}}
+        d = settle("clamp-001", "codex", "claude", READINGS, reveals)[2][-1]
+        self.assertEqual((d.b, d.evidence), ("name them lo and hi", ""))
+
     def test_agreements_become_points_and_disagreements_become_disputes(self):
         interface, points, disputes = settle("clamp-001", "codex", "claude", READINGS, REVEALS)
         self.assertEqual(interface, "clamplib.clamp(x, lo, hi)")
@@ -44,6 +58,28 @@ class Settle(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "codex gave no verdict on claude decision 1"):
             settle("clamp-001", "codex", "claude", READINGS, reveals)
 
+class Interface(unittest.TestCase):
+    def r(self, ok=False, objection="names differ", replacement="clamplib.clamp(value, low, high)"):
+        return {"interface_ok": ok, "interface_objection": objection, "interface_replacement": replacement, "verdicts": []}
+
+    def test_an_accepted_interface_is_not_checked_even_with_populated_fields(self):
+        self.assertIsNone(interface_problem(self.r(ok=True, objection="", replacement=""), "i"))
+        self.assertIsNone(interface_problem(self.r(ok=True), "i"))
+        self.assertIsNone(interface_problem(self.r(ok=True, objection="", replacement="i"), "i"))
+
+    def test_an_objection_needs_a_reason_and_a_different_complete_interface(self):
+        self.assertEqual(interface_problem(self.r(objection=" "), "i"),
+                         "interface_objection must say why you object when interface_ok is false")
+        for blank in ("", " \n\t "):
+            with self.subTest(replacement=blank):
+                self.assertEqual(interface_problem(self.r(replacement=blank), "i"),
+                                 "interface_replacement must hold the complete interface you want when interface_ok is false")
+        self.assertEqual(interface_problem(self.r(replacement=" clamplib.clamp(x, lo, hi)\n"), "clamplib.clamp(x, lo, hi)"),
+                         "interface_replacement is the same as the builder's interface; give the interface you want, "
+                         "or set interface_ok to true")
+        self.assertIsNone(interface_problem(self.r(), "clamplib.clamp(x, lo, hi)"))
+
+
 class Rulings(unittest.TestCase):
     d = Dispute("D-t-1", "reading", "q", "A", "B", "codex (builder)", "claude (challenger)")
 
@@ -55,8 +91,10 @@ class Rulings(unittest.TestCase):
                 ruling_text(dispute, choice, note)
 
     def test_scope_defaults(self):
-        self.assertEqual([default_scope(k) for k in ("reading", "interface", "check", "mutant", "unresolved")],
-                         ["project", "project", "project", "task", "task"])
+        kinds = ("reading", "interface", "check", "mutant", "unresolved")
+        self.assertEqual([default_scope(k) for k in kinds], ["project", "project", "project", "task", "task"])
+        self.assertEqual([default_scope(k, whole_interface=True) for k in kinds],
+                         ["project", "task", "project", "task", "task"])
 
     def test_precedents_are_project_rulings_in_order(self):
         events = [{"type": "ruling.made", "task": "t1", "dispute": "D-t1-1", "kind": "reading", "question": "q1", "choice": "a", "text": "r1", "scope": "project", "while": "", "limitation": ""},

@@ -49,8 +49,10 @@ EMPTY_WITNESS = {"scenario": "", "observation": "", "theirs": "", "mine": "", "d
 _REVERSED_WITNESS = {"scenario": "clamp(5, 10, 1)", "observation": "what the call returns or raises",
                      "theirs": "raises ValueError", "mine": "returns 5", "decided_by": ""}
 
-def reveal(*verdicts, interface_ok=True, objection=""):
-    """Each verdict is (agree, counter) or (agree, counter, witness) for the other seat's decision at that position.
+def reveal(*verdicts, interface_ok=True, objection="", replacement=""):
+    """`replacement=None` leaves the key out: a reply under the prior protocol (Task 17's REVEAL).
+
+    Each verdict is (agree, counter) or (agree, counter, witness) for the other seat's decision at that position.
 
     An agreeing verdict gets an empty witness. A disagreeing one without a witness gets the
     reversed-bounds witness when its counter is "swap the bounds"; any other must give one.
@@ -65,9 +67,13 @@ def reveal(*verdicts, interface_ok=True, objection=""):
             return dict(_REVERSED_WITNESS)
         raise ValueError("conductor_kit.reveal: give a witness for this disagreement")
     witnesses = [witness_of(v) for v in verdicts]
-    return lambda req: {"interface_ok": interface_ok, "interface_objection": objection,
-                        "verdicts": [{"index": i, "agree": v[0], "counter": v[1], "why": "", "witness": witnesses[i]}
+    def step(req):
+        head = {"interface_ok": interface_ok, "interface_objection": objection}
+        if replacement is not None:
+            head["interface_replacement"] = replacement
+        return {**head, "verdicts": [{"index": i, "agree": v[0], "counter": v[1], "why": "", "witness": witnesses[i]}
                                      for i, v in enumerate(verdicts)]}
+    return step
 
 def _mutant_list(mutants):
     return [{"id": name, "description": name, "files": [FILE]} for name in mutants]
@@ -113,6 +119,23 @@ def responds(stance, files=None, mutants=None, undeclared=()):
         return {"answers": [{"dispute": i, "stance": stance, "cite": "", "why": ""} for i in ids],
                 "blocked": "", "mutants": _mutant_list(mutants_now), "files": declared}
     return step
+
+# Task 18: three complete interfaces that share the path, import, signature and error forms and
+# differ only in a public alias, and a separate decision that both seats agree on.
+INTERFACE_A = ("Files: clamplib/__init__.py (modify)\n"
+               "Import: from clamplib import clamp\n"
+               "Signature: clamp(x, lo, hi), returning one of the objects passed as x, lo or hi\n"
+               "Errors: ValueError, and any exception an operand comparison raises")
+INTERFACE_B = INTERFACE_A + "\nAlias: clip = clamp"
+INTERFACE_NOTE = INTERFACE_A + "\nAlias: clamp_range = clamp"
+COMPARISON = {"question": "What happens if an operand comparison raises?",
+              "answer": "Propagate the original exception unchanged.", "why": "caller code owns its errors"}
+
+def interface_section(contract: str) -> str:
+    """The text of a contract's one interface section."""
+    if contract.count("## Interface\n") != 1:
+        raise AssertionError(f"expected exactly one interface section:\n{contract}")
+    return contract.split("## Interface\n", 1)[1].split("\n\n## Decisions\n", 1)[0]
 
 def types(conductor: Conductor, task="clamp-001") -> list[str]:
     return [e["type"] for e in conductor.events(task)]

@@ -121,11 +121,16 @@ def stub_seats() -> dict[str, Seat]:
 
     def reveal(*verdicts):
         why = "Treat the bounds in either order so the same interval is accepted."
-        return lambda req: {"interface_ok": True, "interface_objection": "",
-                            "verdicts": [{"index": i, "agree": agree, "counter": counter,
-                                          "why": "" if agree else why,
-                                          "witness": dict(empty if agree else reversed_bounds)}
-                                         for i, (agree, counter) in enumerate(verdicts)]}
+        def step(req):
+            head = {"interface_ok": True, "interface_objection": ""}
+            if "interface_replacement" in req.schema["properties"]:
+                head["interface_replacement"] = ""
+            return {**head,
+                    "verdicts": [{"index": i, "agree": agree, "counter": counter,
+                                  "why": "" if agree else why,
+                                  "witness": dict(empty if agree else reversed_bounds)}
+                                 for i, (agree, counter) in enumerate(verdicts)]}
+        return step
 
     def build(req):
         ruled = _ruled(req)

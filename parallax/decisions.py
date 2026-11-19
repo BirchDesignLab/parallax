@@ -160,8 +160,14 @@ def settle(task: str, builder: str, challenger: str, readings: dict[str, dict],
         raise ValueError("interface_ok must be a boolean")
     if not reveal["interface_ok"]:
         objection = _text(reveal["interface_objection"], "interface_objection")
+        if "interface_replacement" in reveal:
+            b = _text(reveal["interface_replacement"], "interface_replacement").strip()
+            evidence = (f"Why {challenger} objects: {objection.strip()}\n"
+                        "b and other replace the whole interface; for other, give the complete interface with --note.")
+        else:
+            b, evidence = objection, ""
         disputes.append(Dispute(f"D-{task}-{start + len(disputes)}", "interface",
-                                "What interface should the contract use?", interface, objection, *labels))
+                                "What interface should the contract use?", interface, b, *labels, evidence))
     return interface, points, disputes
 
 
@@ -177,10 +183,27 @@ def ruling_text(dispute: Dispute, choice: str, note: str) -> str:
     raise ValueError(f"invalid choice {choice!r} for {dispute.kind}")
 
 
-def default_scope(kind: str) -> str:
+def default_scope(kind: str, whole_interface: bool = False) -> str:
     if not isinstance(kind, str) or kind not in _SCOPES:
         raise ValueError("unknown dispute kind")
+    if whole_interface and kind == "interface":
+        return "task"
     return _SCOPES[kind]
+
+
+def interface_problem(reveal: dict, interface: str) -> str | None:
+    """Why the challenger's interface fields are unusable against the builder's interface, or None."""
+    if reveal["interface_ok"]:
+        return None
+    if not reveal["interface_objection"].strip():
+        return "interface_objection must say why you object when interface_ok is false"
+    replacement = reveal["interface_replacement"].strip()
+    if not replacement:
+        return "interface_replacement must hold the complete interface you want when interface_ok is false"
+    if replacement == interface.strip():
+        return ("interface_replacement is the same as the builder's interface; give the interface you want, "
+                "or set interface_ok to true")
+    return None
 
 
 def precedents(events: Sequence[dict]) -> list[dict]:

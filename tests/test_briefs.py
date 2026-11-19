@@ -1,4 +1,4 @@
-import json, re, unittest
+import hashlib, json, re, unittest
 from parallax import briefs
 from parallax.config import load_config
 from tests.test_config import SAMPLE_TOML, project
@@ -29,6 +29,57 @@ class Briefs(unittest.TestCase):
                      "Agree when you accept the builder's whole answer as written",
                      "Never agree to an answer you believe is contradicted"):
             self.assertIn(part, text)
+
+    def test_reading_keeps_conditions_in_decisions_and_records_each_guarantee_once(self):
+        text = self.all["reading"]
+        for part in ("the import or entry point", "full signature and calling conventions",
+                     "Say what forms a result or an error can take, including errors raised by code the caller supplies",
+                     "Put the conditions that select an outcome, and the order of checks, in `decisions`",
+                     "Record each guarantee once, including requirements the task or an applicable precedent fixes",
+                     "keep policies that can be chosen independently in separate entries",
+                     "Return an empty list when there is no behavior or open choice to record."):
+            self.assertIn(part, text)
+        self.assertNotIn("If the task is fully clear", text)
+
+    def test_reveal_asks_the_challenger_for_a_complete_standalone_replacement(self):
+        challenger, builder = self.all["reveal"], briefs.reveal("builder", OTHER)
+        for part in ("`interface_replacement` (string)", "a complete interface that a caller can use on its own",
+                     "Carry forward each unaffected file, import, public name, signature, calling convention, "
+                     "result form and error form",
+                     "it replaces the builder's interface as written",
+                     "object when the interface states a condition or an order of checks that belongs in a decision",
+                     "find where the task or a sealed decision states the behavior you mean to keep",
+                     "name the gap in `interface_objection` and keep that guarantee in `interface_replacement`",
+                     "If the only issue is where a guarantee is written and removing it would lose it, accept the "
+                     "builder's interface"):
+            self.assertIn(part, challenger)
+        self.assertIn("`interface_objection` and `interface_replacement` to empty strings", builder)
+        self.assertNotIn("it is added to the interface as written", challenger)
+
+    def test_tasks_opened_before_the_change_keep_the_prior_briefs(self):
+        reading = briefs.reading("Add clamp.", "builder", self.cfg, [PRECEDENT], whole=False)
+        self.assertIn("every public name in it with its full signature, parameters, return value and errors raised", reading)
+        self.assertIn("If the task is fully clear, return an empty list.", reading)
+        self.assertNotIn("calling conventions", reading)
+        for role in briefs.ROLES:
+            self.assertNotIn("interface_replacement", briefs.reveal(role, OTHER, whole=False), role)
+        self.assertIn("it is added to the interface as written", briefs.reveal("challenger", OTHER, whole=False))
+        self.assertIn("`interface_objection` to an empty string", briefs.reveal("builder", OTHER, whole=False))
+
+    def test_the_prior_briefs_are_pinned_to_the_reviewed_task_17_text(self):
+        # SHA-256 of the UTF-8 text at commit 9877c55, checked by the controller and by Codex's second review.
+        sha = lambda text: hashlib.sha256(text.encode("utf-8")).hexdigest()
+        pinned = {
+            ("reading", "builder"): "b6ca5c532f9d262e65d9f9489ca3e14aa7f619cc5db422a2e86e797d3baf179d",
+            ("reading", "challenger"): "da76d5fdcff6b6fdd5edb6d2ea6386a9f5afd46dcba47723d65071544b590dd9",
+            ("reveal", "builder"): "491469b301796fd2fb45f6d9fe4c397c67b499348d906757b9bbe8c8d1a54525",
+            ("reveal", "challenger"): "48581388b99c14af93f1e0fbad1bb4c988e86f5cc0b589a0ee7564de59f7f914",
+        }
+        for (stage, role), expected in pinned.items():
+            with self.subTest(stage=stage, role=role):
+                text = (briefs.reading("Add clamp.", role, self.cfg, [PRECEDENT], whole=False) if stage == "reading"
+                        else briefs.reveal(role, OTHER, whole=False))
+                self.assertEqual(sha(text), expected)
 
     def test_rejected_appends_the_reason_and_scrubs_paths(self):
         text = briefs.rejected("# Reveal\nbody", r"verdict 0: missing scenario (see C:\Users\x\clone)")

@@ -1,13 +1,16 @@
 import json, os, unittest
 from pathlib import Path
 from unittest import mock
-from parallax import decisions, folders, schemas
+from parallax import briefs, decisions, demo, folders, schemas
 from parallax.conductor import Conductor
 from parallax.config import load_config
+from parallax.gitops import rev
 from parallax.ledger import sha256_text
 from parallax.seats.base import SeatResult
 from parallax.seats.stub import StubSeat
-from tests.conductor_kit import DECISION, EMPTY_WITNESS, kit_conductor, make_project, reading, reveal, types
+from tests.conductor_kit import (COMPARISON, DECISION, EMPTY_WITNESS, INTERFACE_A, INTERFACE_B, INTERFACE_NOTE,
+                                 interface_section, kit_conductor, make_project, reading, reveal, types)
+from tests.helpers import commit
 
 TASK = "tasks/clamp-001.md"
 
@@ -19,7 +22,27 @@ def disagreeing():
     return (StubSeat("codex", {"reading": [reading(DECISION)], "reveal": [reveal()]}),
             StubSeat("claude", {"reading": [reading()], "reveal": [reveal((False, "swap the bounds"))]}))
 
+def contract_text(root, version=1):
+    return (root / f".parallax/run/clamp-001/contract-v{version}.md").read_text(encoding="utf-8")
+
+def open_unmarked(c, root, task="clamp-001", builder="codex", challenger="claude"):
+    """Record `task.opened` as it was written before Task 18, with no `interface_protocol`."""
+    c.journal.append("task.opened", task, kind="behavior", base=rev(root, "main"), builder=builder,
+                     challenger=challenger, title=task)
+
+def resumed(root, c):
+    """A fresh conductor on the same project and state home, with seats that have no steps left."""
+    codex, claude = StubSeat("codex", {}), StubSeat("claude", {})
+    again = Conductor(load_config(root), {"codex": codex, "claude": claude}, say=lambda s: None, home=c.home)
+    return again, codex, claude
+
 class ToContract(unittest.TestCase):
+    def test_a_new_task_records_the_complete_interface_protocol(self):
+        root = make_project(); codex, claude = agreeing()
+        c = kit_conductor(root, codex, claude)
+        c.run(root / TASK, stop_after="contract")
+        self.assertEqual(c.events("clamp-001")[0]["interface_protocol"], "whole")
+
     def test_agreement_freezes_a_contract(self):
         root = make_project(); codex, claude = agreeing()
         c = kit_conductor(root, codex, claude)
@@ -100,17 +123,6 @@ class ToContract(unittest.TestCase):
         self.assertEqual(c.events("clamp-002")[0]["builder"], "claude")
         self.assertIn("P-1", codex.calls[-2].brief)
 
-    def test_interface_objection_is_a_dispute_and_an_amendment(self):
-        root = make_project()
-        codex = StubSeat("codex", {"reading": [reading()], "reveal": [reveal()]})
-        claude = StubSeat("claude", {"reading": [reading()], "reveal": [reveal(interface_ok=False, objection="return an int")]})
-        c = kit_conductor(root, codex, claude)
-        out = c.run(root / TASK, stop_after="contract")
-        self.assertEqual(out.disputes[0].kind, "interface")
-        c.rule(out.disputes[0].id, "b"); c.run(root / TASK, stop_after="contract")
-        self.assertIn("clamplib.clamp(x, lo, hi) -> number\nAmended: return an int",
-                      (root / ".parallax/run/clamp-001/contract-v1.md").read_text(encoding="utf-8"))
-
     def test_a_witness_is_shown_but_never_enters_the_contract_or_precedents(self):
         root = make_project(); codex, claude = disagreeing()
         odd = {"scenario": "clamp(5, 10, 1)", "observation": "WITNESS-ONLY-7f3", "theirs": "raises ValueError",
@@ -135,6 +147,138 @@ class ToContract(unittest.TestCase):
         self.assertIn("contract.frozen", types(c))
         self.assertEqual(([r.stage for r in codex.calls], [r.stage for r in claude.calls]),
                          (["reading", "reveal"], ["reading", "reveal"]))
+
+
+class WholeInterface(unittest.TestCase):
+    OBJECTION = "callers want the short name clip"
+    ALIASES = ("Alias: clip = clamp", "Alias: clamp_range = clamp")
+
+    def test_a_b_and_other_each_leave_exactly_the_selected_interface_and_the_agreed_decision(self):
+        for choice, note, expected in (("a", "", INTERFACE_A), ("b", "", INTERFACE_B),
+                                       ("other", INTERFACE_NOTE, INTERFACE_NOTE)):
+            with self.subTest(choice=choice):
+                root = make_project()
+                codex = StubSeat("codex", {"reading": [reading(COMPARISON, interface=INTERFACE_A)], "reveal": [reveal()]})
+                claude = StubSeat("claude", {"reading": [reading(interface=INTERFACE_B)], "reveal": [
+                    reveal((True, ""), interface_ok=False, objection=self.OBJECTION, replacement=INTERFACE_B)]})
+                c = kit_conductor(root, codex, claude)
+                [d] = c.run(root / TASK, stop_after="contract").disputes
+                self.assertEqual((d.kind, d.a, d.b), ("interface", INTERFACE_A, INTERFACE_B))
+                self.assertEqual(d.evidence, f"Why claude objects: {self.OBJECTION}\n"
+                                             "b and other replace the whole interface; for other, give the complete "
+                                             "interface with --note.")
+                again, codex, claude = resumed(root, c)
+                again.rule(d.id, choice, note=note)
+                self.assertEqual(again.run(root / TASK, stop_after="contract").status, "stopped")
+                text = contract_text(root)
+                self.assertEqual(interface_section(text), expected)
+                self.assertIn(f"- Q: {COMPARISON['question']}\n  A: {COMPARISON['answer']} (agreed)\n", text)
+                for alias in self.ALIASES:
+                    if alias not in expected:
+                        self.assertNotIn(alias, text)
+                self.assertNotIn("Amended:", text)
+                self.assertEqual((codex.calls, claude.calls), ([], []))
+                self.assertEqual((types(again).count("ruling.made"), types(again).count("contract.frozen")), (1, 1))
+                [ruling] = [e for e in again.events("clamp-001") if e["type"] == "ruling.made"]
+                marked = [e for e in again.events("clamp-001") if e["type"] in ("dispute.opened", "contract.frozen")]
+                self.assertEqual([e.get("interface_protocol") for e in marked], ["whole", "whole"])
+                self.assertEqual(ruling["scope"], "task")
+                self.assertEqual(decisions.precedents(again.events()), [])
+
+    def test_the_builders_interface_fields_have_no_effect(self):
+        root = make_project()
+        codex = StubSeat("codex", {"reading": [reading(interface=INTERFACE_A)], "reveal": [reveal(interface_ok=False)]})
+        claude = StubSeat("claude", {"reading": [reading(interface=INTERFACE_B)], "reveal": [reveal()]})
+        c = kit_conductor(root, codex, claude)
+        self.assertEqual(c.run(root / TASK, stop_after="contract").status, "stopped")
+        self.assertEqual(interface_section(contract_text(root)), INTERFACE_A)
+        self.assertEqual(([r.stage for r in codex.calls], [r.stage for r in claude.calls]),
+                         (["reading", "reveal"], ["reading", "reveal"]))
+
+    def test_a_replacement_equal_to_the_builders_interface_is_retried_in_either_role_assignment(self):
+        interfaces = {"codex": INTERFACE_A, "claude": INTERFACE_B}
+        for builder, challenger in (("codex", "claude"), ("claude", "codex")):
+            with self.subTest(builder=builder):
+                root = make_project()
+                scripts = {seat: {"reading": [reading(interface=interfaces[seat])]} for seat in interfaces}
+                scripts[builder]["reveal"] = [reveal()]
+                # The first replacement equals the builder's interface but not the challenger's own.
+                scripts[challenger]["reveal"] = [
+                    reveal(interface_ok=False, objection=self.OBJECTION, replacement=interfaces[builder] + "\n"),
+                    reveal(interface_ok=False, objection=self.OBJECTION, replacement=INTERFACE_NOTE)]
+                seats = {seat: StubSeat(seat, scripts[seat]) for seat in interfaces}
+                c = kit_conductor(root, seats["codex"], seats["claude"])
+                out = c.run(root / TASK, builder=builder, stop_after="contract")
+                [d] = out.disputes
+                self.assertEqual((d.a, d.b), (interfaces[builder], INTERFACE_NOTE))
+                first, second = [r for r in seats[challenger].calls if r.stage == "reveal"]
+                self.assertNotIn("Your last reply was rejected", first.brief)
+                self.assertIn("interface_replacement is the same as the builder's interface; give the interface you want, "
+                              "or set interface_ok to true", second.brief)
+                self.assertEqual(len([r for r in seats[builder].calls if r.stage == "reveal"]), 1)
+
+    def test_witness_and_interface_problems_are_reported_together_witness_first(self):
+        root = make_project()
+        codex = StubSeat("codex", {"reading": [reading(DECISION)], "reveal": [reveal()]})
+        claude = StubSeat("claude", {"reading": [reading()], "reveal": [
+            reveal((False, "swap the bounds", EMPTY_WITNESS), interface_ok=False, objection=self.OBJECTION),
+            reveal((False, "swap the bounds"), interface_ok=False, objection=self.OBJECTION, replacement=INTERFACE_B)]})
+        out = kit_conductor(root, codex, claude).run(root / TASK, stop_after="contract")
+        self.assertEqual([(d.kind, d.b) for d in out.disputes], [("reading", "swap the bounds"), ("interface", INTERFACE_B)])
+        reason = [r for r in claude.calls if r.stage == "reveal"][1].brief.split("## Your last reply was rejected")[1]
+        self.assertIn("verdict 0: a disagreement needs a witness with scenario, observation, theirs and mine; "
+                      "missing scenario, observation, theirs, mine\n"
+                      "interface_replacement must hold the complete interface you want when interface_ok is false",
+                      reason)
+
+    def test_interface_rulings_keep_their_scope_and_only_project_rulings_reach_the_next_brief(self):
+        root = make_project()
+        for n in (3, 4):
+            (root / f"tasks/clamp-00{n}.md").write_text(f"Add clamp variant {n} to clamplib.\n", encoding="utf-8")
+        r2, r3 = "clamplib.clamp_all(values, lo, hi) -> list", "clamplib.clamp(x, lo, hi) -> float"
+        codex, claude = StubSeat("codex", {}), StubSeat("claude", {})
+        seats = {"codex": codex, "claude": claude}
+        c = kit_conductor(root, codex, claude)
+        # A project-scoped interface ruling already landed on main before the upgrade. The ledger holds
+        # only this event, so role alternation (which counts task.opened events) is unaffected.
+        old = {"ts": "2026-11-01T00:00:00Z", "type": "ruling.made", "task": "clamp-000", "dispute": "D-clamp-000-1",
+               "kind": "interface", "question": "What interface should the contract use?", "choice": "b",
+               "text": "return a number", "scope": "project", "while": "", "limitation": ""}
+        commit(root, {".parallax/ledger.jsonl": json.dumps(old) + "\n"}, "Land clamp-000")
+        self.assertEqual([(p["id"], p["task"]) for p in decisions.precedents(c.events())], [("P-1", "clamp-000")])
+        open_unmarked(c, root)                                  # clamp-001 was opened before Task 18
+        steps = (("clamp-001", "codex", reveal(interface_ok=False, objection="return an int", replacement=None), {}),
+                 ("clamp-002", "claude", reveal(interface_ok=False, objection="a list helper", replacement=r2), {}),
+                 ("clamp-003", "codex", reveal(interface_ok=False, objection="return a float", replacement=r3),
+                  {"scope": "project", "while_": "single user"}))
+        for name, builder, objecting, ruling in steps:
+            with self.subTest(task=name):
+                challenger = "claude" if builder == "codex" else "codex"
+                seats[builder].script = {"reading": [reading()],
+                                         "reveal": [reveal(replacement=None if name == "clamp-001" else "")]}
+                seats[challenger].script = {"reading": [reading()], "reveal": [objecting]}
+                [d] = c.run(root / f"tasks/{name}.md", stop_after="contract").disputes
+                self.assertEqual((c.events(name)[0]["builder"], d.kind), (builder, "interface"))
+                c.rule(d.id, "b", **ruling)
+                self.assertEqual(c.run(root / f"tasks/{name}.md", stop_after="contract").status, "stopped")
+        rulings = [e for e in c.events() if e["type"] == "ruling.made"]
+        self.assertEqual([(e["task"], e["scope"], e["while"]) for e in rulings],
+                         [("clamp-000", "project", ""), ("clamp-001", "project", ""), ("clamp-002", "task", ""),
+                          ("clamp-003", "project", "single user")])
+        self.assertEqual([(p["id"], p["task"], p["ruling"]) for p in decisions.precedents(c.events())],
+                         [("P-1", "clamp-000", "return a number"), ("P-2", "clamp-001", "return an int"),
+                          ("P-3", "clamp-003", r3)])
+        codex.script = {"reading": [reading()], "reveal": [reveal()]}
+        claude.script = {"reading": [reading()], "reveal": [reveal()]}
+        self.assertEqual(c.run(root / "tasks/clamp-004.md", stop_after="contract").status, "stopped")
+        for seat in (codex, claude):
+            brief = [r for r in seat.calls if r.stage == "reading"][-1].brief
+            self.assertIn("- P-1 (from task clamp-000): What interface should the contract use? Ruling: return a number.\n"
+                          "- P-2 (from task clamp-001): What interface should the contract use? Ruling: return an int.\n"
+                          f"- P-3 (from task clamp-003): What interface should the contract use? Ruling: {r3}. "
+                          "Holds while: single user.", brief)
+            self.assertNotIn(r2, brief)
+            self.assertNotIn("P-4", brief)
 
 
 class Failures(unittest.TestCase):
@@ -171,7 +315,7 @@ class Failures(unittest.TestCase):
         root = make_project(); codex, claude = disagreeing()
         codex.script["reading"] = [reading(DECISION, {"question": "NaN?", "answer": "return NaN", "why": "ieee"})]
         same = {"scenario": "s", "observation": "o", "theirs": "t", "mine": "t", "decided_by": ""}
-        bad = lambda req: {"interface_ok": True, "interface_objection": "", "verdicts": [
+        bad = lambda req: {"interface_ok": True, "interface_objection": "", "interface_replacement": "", "verdicts": [
             {"index": 1, "agree": False, "counter": "c", "why": "", "witness": same},
             {"index": 0, "agree": False, "counter": "c", "why": "", "witness": EMPTY_WITNESS}]}
         claude.script["reveal"] = [bad, reveal((True, ""), (True, ""))]
@@ -184,7 +328,7 @@ class Failures(unittest.TestCase):
     def test_the_index_check_comes_before_the_witness_check(self):
         root = make_project(); codex, claude = disagreeing()
         codex.script["reading"] = [reading(DECISION, {"question": "NaN?", "answer": "return NaN", "why": "ieee"})]
-        dup = lambda req: {"interface_ok": True, "interface_objection": "", "verdicts": [
+        dup = lambda req: {"interface_ok": True, "interface_objection": "", "interface_replacement": "", "verdicts": [
             {"index": 0, "agree": False, "counter": "c", "why": "", "witness": EMPTY_WITNESS}] * 2}
         claude.script["reveal"] = [dup, reveal((True, ""), (True, ""))]
         kit_conductor(root, codex, claude).run(root / TASK, stop_after="contract")
@@ -256,15 +400,16 @@ def legacy_reveal(*verdicts):
                                      for i, (a, c) in enumerate(verdicts)]}
 
 class Upgrade(unittest.TestCase):
-    """A task paused before Task 17, with witnessless reveals sealed, resumes under it without a seat call."""
+    """Tasks paused before Task 17 or Task 18 reuse sealed outputs and call only seats with outstanding work."""
     CARD = ".parallax/run/clamp-001/cards/D-clamp-001-1.md"
 
     def paused(self):
         root = make_project()
-        codex = StubSeat("codex", {"reading": [reading(DECISION)], "reveal": [reveal()]})
+        codex = StubSeat("codex", {"reading": [reading(DECISION)], "reveal": [legacy_reveal()]})
         claude = StubSeat("claude", {"reading": [reading()], "reveal": [legacy_reveal((False, "swap the bounds"))]})
         c = kit_conductor(root, codex, claude)
-        with mock.patch("parallax.schemas.REVEAL", OLD_REVEAL), mock.patch("parallax.decisions.witness_problem", lambda v: None):
+        open_unmarked(c, root)
+        with mock.patch("parallax.schemas.REVEAL_AMENDING", OLD_REVEAL), mock.patch("parallax.decisions.witness_problem", lambda v: None):
             self.assertEqual(c.run(root / TASK, stop_after="contract").status, "needs_ruling")
         return root, c
 
@@ -273,16 +418,11 @@ class Upgrade(unittest.TestCase):
         events = [change(json.loads(line)) for line in path.read_text(encoding="utf-8").splitlines() if line]
         path.write_text("".join(json.dumps(e) + "\n" for e in events if e is not None), encoding="utf-8", newline="\n")
 
-    def resumed(self, root, c):
-        codex, claude = StubSeat("codex", {}), StubSeat("claude", {})
-        again = Conductor(load_config(root), {"codex": codex, "claude": claude}, say=lambda s: None, home=c.home)
-        return again, codex, claude
-
     def test_reveals_sealed_before_the_upgrade_open_a_reasons_only_card(self):
         root, c = self.paused()
         (root / self.CARD).unlink()
         self.rewrite(root, lambda e: None if e["type"] == "dispute.opened" else e)
-        again, codex, claude = self.resumed(root, c)
+        again, codex, claude = resumed(root, c)
         out = again.run(root / TASK, stop_after="contract")
         self.assertEqual((out.status, [d.id for d in out.disputes]), ("needs_ruling", ["D-clamp-001-1"]))
         self.assertEqual(out.disputes[0].evidence, "Reasons:\n  a) codex: caller error\n  b) claude: older reason")
@@ -299,7 +439,7 @@ class Upgrade(unittest.TestCase):
                              if e["type"] == "dispute.opened" else e)
                 (root / self.CARD).write_text(decisions.render_card(old), encoding="utf-8", newline="\n")
                 before = (root / self.CARD).read_bytes()
-                again, codex, claude = self.resumed(root, c)
+                again, codex, claude = resumed(root, c)
                 out = again.run(root / TASK, stop_after="contract")
                 self.assertEqual((out.status, [d.id for d in out.disputes]), ("needs_ruling", ["D-clamp-001-1"]))
                 self.assertEqual(decisions.render_card(out.disputes[0]).encode("utf-8"), before)
@@ -310,3 +450,172 @@ class Upgrade(unittest.TestCase):
                 self.assertIn("A: swap the bounds (ruled D-clamp-001-1)",
                               (root / ".parallax/run/clamp-001/contract-v1.md").read_text(encoding="utf-8"))
                 self.assertEqual((codex.calls, claude.calls), ([], []))
+
+    def test_an_unmarked_task_finishes_its_reveals_under_the_prior_protocol_in_either_order(self):
+        # Task 17's shape: a witnessed disagreement and an interface delta, with no replacement key.
+        task17 = reveal((False, "swap the bounds"), interface_ok=False, objection="return an int", replacement=None)
+        # A schema-valid Task 17 reply with an empty witness: Task 17's check must still reject it.
+        empty17 = reveal((False, "swap the bounds", EMPTY_WITNESS), interface_ok=False, objection="return an int",
+                         replacement=None)
+        late = {"codex": [reveal(replacement=None)], "claude": [empty17, task17]}
+        nothing = lambda req: {}
+        for sealed, waiting in (("codex", "claude"), ("claude", "codex")):
+            with self.subTest(sealed_first=sealed):
+                root = make_project()
+                scripts = {"codex": {"reading": [reading(DECISION)]}, "claude": {"reading": [reading()]}}
+                scripts[sealed]["reveal"] = list(late[sealed])
+                scripts[waiting]["reveal"] = [nothing, nothing]
+                first = {seat: StubSeat(seat, scripts[seat]) for seat in ("codex", "claude")}
+                c = kit_conductor(root, first["codex"], first["claude"])
+                open_unmarked(c, root)
+                self.assertEqual(c.run(root / TASK, stop_after="contract").status, "blocked")
+                task_text = (root / TASK).read_text(encoding="utf-8")
+                for seat, role in (("codex", "builder"), ("claude", "challenger")):
+                    [r] = [r for r in first[seat].calls if r.stage == "reading"]
+                    self.assertEqual(r.brief, briefs.reading(task_text, role, c.cfg, [], whole=False))
+                again, codex, claude = resumed(root, c)
+                seats = {"codex": codex, "claude": claude}
+                seats[waiting].script = {"reveal": list(late[waiting])}
+                out = again.run(root / TASK, stop_after="contract")
+                self.assertEqual(seats[sealed].calls, [])
+                calls = seats[waiting].calls
+                self.assertEqual([r.stage for r in calls], ["reveal"] * len(late[waiting]))
+                role, other = ("challenger", reading(DECISION)(None)) if waiting == "claude" else ("builder", reading()(None))
+                other = json.loads(json.dumps(other, sort_keys=True))     # as the conductor reloads it from storage
+                self.assertIs(calls[0].schema, schemas.REVEAL_AMENDING)
+                self.assertEqual(calls[0].brief, briefs.reveal(role, other, whole=False))
+                # The challenger's empty Task 17 witness was rejected, in whichever run it reached.
+                challenger_seat = seats["claude"] if waiting == "claude" else first["claude"]
+                initial, retry = [r for r in challenger_seat.calls if r.stage == "reveal"]
+                self.assertIs(initial.schema, schemas.REVEAL_AMENDING)
+                reason = retry.brief.split("## Your last reply was rejected", 1)[1]
+                self.assertIn("verdict 0: a disagreement needs a witness", reason)
+                self.assertNotIn("interface_replacement", reason)
+                self.assertEqual([(d.kind, d.b, d.evidence) for d in out.disputes][1], ("interface", "return an int", ""))
+                again.rule("D-clamp-001-1", "a"); again.rule("D-clamp-001-2", "b")
+                self.assertEqual(again.run(root / TASK, stop_after="contract").status, "stopped")
+                self.assertEqual(interface_section(contract_text(root)),
+                                 "clamplib.clamp(x, lo, hi) -> number\nAmended: return an int")
+
+    def test_a_legacy_interface_card_ruled_after_the_upgrade_still_amends_with_project_scope(self):
+        for choice, note, delta in (("b", "", "return an int"), ("other", "return a float", "return a float")):
+            with self.subTest(choice=choice):
+                root = make_project()
+                codex = StubSeat("codex", {"reading": [reading()], "reveal": [reveal(replacement=None)]})
+                claude = StubSeat("claude", {"reading": [reading()], "reveal": [
+                    reveal(interface_ok=False, objection="return an int", replacement=None)]})
+                c = kit_conductor(root, codex, claude)
+                open_unmarked(c, root)
+                out = c.run(root / TASK, stop_after="contract")
+                self.assertEqual([(d.kind, d.b, d.evidence) for d in out.disputes], [("interface", "return an int", "")])
+                again, codex, claude = resumed(root, c)
+                again.rule("D-clamp-001-1", choice, note=note)
+                self.assertEqual(again.run(root / TASK, stop_after="contract").status, "stopped")
+                text = contract_text(root)
+                self.assertEqual(interface_section(text), f"clamplib.clamp(x, lo, hi) -> number\nAmended: {delta}")
+                self.assertEqual(text.count("Amended:"), 1)
+                self.assertEqual((codex.calls, claude.calls), ([], []))
+                [ruling] = [e for e in again.events("clamp-001") if e["type"] == "ruling.made"]
+                self.assertEqual(ruling["scope"], "project")
+
+    def test_the_demo_seats_can_finish_an_unmarked_task(self):
+        # An interrupted stub demo, reopened after the upgrade, still owes both reveals.
+        root = make_project()
+        stubs = demo.stub_seats()
+        c = kit_conductor(root, stubs["codex"], stubs["claude"])
+        open_unmarked(c, root)
+        out = c.run(root / TASK, stop_after="contract")
+        self.assertEqual([(d.kind, d.question, d.b) for d in out.disputes],
+                         [("reading", "What if lo > hi?", "swap the bounds")])
+        for seat in stubs.values():
+            [call] = [r for r in seat.calls if r.stage == "reveal"]
+            self.assertIs(call.schema, schemas.REVEAL_AMENDING)
+
+    def test_only_the_challengers_recorded_reveal_must_match_the_protocol(self):
+        # One reveal is sealed under `written`; the other seat fails twice, so the run blocks before
+        # settlement. Then only the opening's marker flips to `now`, and the outstanding seat answers under it.
+        nothing = lambda req: {}
+        objecting = lambda protocol: reveal(interface_ok=False, objection="return an int",
+                                            replacement="clamplib.clamp(x, lo, hi) -> int" if protocol == "whole" else None)
+        accepting = lambda protocol: reveal(replacement="" if protocol == "whole" else None)
+        answer = {"codex": accepting, "claude": objecting}
+        b_under = {"whole": "clamplib.clamp(x, lo, hi) -> int", "amending": "return an int"}
+        for written, now in (("amending", "whole"), ("whole", "amending")):
+            for sealed, waiting in (("claude", "codex"), ("codex", "claude")):
+                with self.subTest(written=written, sealed=sealed):
+                    root = make_project()
+                    scripts = {"codex": {"reading": [reading()]}, "claude": {"reading": [reading()]}}
+                    scripts[sealed]["reveal"] = [answer[sealed](written)]
+                    scripts[waiting]["reveal"] = [nothing, nothing]
+                    c = kit_conductor(root, StubSeat("codex", scripts["codex"]), StubSeat("claude", scripts["claude"]))
+                    if written == "amending":
+                        open_unmarked(c, root)
+                    self.assertEqual(c.run(root / TASK, stop_after="contract").status, "blocked")
+                    self.rewrite(root, lambda e: ({k: v for k, v in e.items() if k != "interface_protocol"}
+                                                  | ({"interface_protocol": "whole"} if now == "whole" else {}))
+                                 if e["type"] == "task.opened" else e)
+                    again, codex, claude = resumed(root, c)
+                    {"codex": codex, "claude": claude}[waiting].script = {"reveal": [answer[waiting](now)]}
+                    out = again.run(root / TASK, stop_after="contract")
+                    if sealed == "claude":
+                        # The challenger's reveal is from the other protocol: block, now and on every rerun.
+                        detail = (f"claude's recorded reveal does not match clamp-001's interface protocol ({now}); "
+                                  "it was written by another version of parallax")
+                        self.assertEqual((out.status, out.detail), ("blocked", detail))
+                        self.assertFalse((root / self.CARD).exists())
+                        self.assertFalse({"dispute.opened", "contract.frozen"} & set(types(again)))
+                        again, codex, claude = resumed(root, c)
+                        out = again.run(root / TASK, stop_after="contract")
+                        self.assertEqual((out.status, out.detail, codex.calls, claude.calls), ("blocked", detail, [], []))
+                    else:
+                        # Only the builder's reveal is from the other protocol, and its interface fields have no effect.
+                        self.assertEqual([(d.kind, d.b) for d in out.disputes], [("interface", b_under[now])])
+
+    def test_a_task_17_card_on_a_marked_task_blocks_the_run_and_the_ruling(self):
+        root = make_project()
+        codex = StubSeat("codex", {"reading": [reading()], "reveal": [reveal()]})
+        claude = StubSeat("claude", {"reading": [reading()], "reveal": [
+            reveal(interface_ok=False, objection="return an int", replacement="clamplib.clamp(x, lo, hi) -> int")]})
+        c = kit_conductor(root, codex, claude)
+        self.assertEqual(c.run(root / TASK, stop_after="contract").status, "needs_ruling")
+        # The card Task 17 would open from the same sealed reveals: the reason as b, no evidence, no marker.
+        old = decisions.Dispute("D-clamp-001-1", "interface", "What interface should the contract use?",
+                                "clamplib.clamp(x, lo, hi) -> number", "return an int",
+                                "codex (builder)", "claude (challenger)")
+        self.rewrite(root, lambda e: {"ts": e["ts"], "type": e["type"], "task": e["task"], **old.to_fields()}
+                     if e["type"] == "dispute.opened" else e)
+        (root / self.CARD).write_text(decisions.render_card(old), encoding="utf-8", newline="\n")
+        detail = ("D-clamp-001-1 does not match clamp-001's interface protocol (whole); "
+                  "it was written by another version of parallax")
+        again, codex, claude = resumed(root, c)
+        out = again.run(root / TASK, stop_after="contract")
+        self.assertEqual((out.status, out.detail), ("blocked", detail))
+        with self.assertRaises(ValueError) as caught:
+            again.rule("D-clamp-001-1", "b")
+        self.assertEqual(str(caught.exception), detail)
+        self.assertFalse({"ruling.made", "contract.frozen"} & set(types(again)))
+        self.assertEqual((root / self.CARD).read_text(encoding="utf-8"), decisions.render_card(old))
+        self.assertEqual((codex.calls, claude.calls), ([], []))
+
+    def test_a_task_17_freeze_on_a_marked_task_blocks_before_build_or_probe(self):
+        root = make_project()
+        replacement = "clamplib.clamp(x, lo, hi) -> int"
+        codex = StubSeat("codex", {"reading": [reading()], "reveal": [reveal()]})
+        claude = StubSeat("claude", {"reading": [reading()], "reveal": [
+            reveal(interface_ok=False, objection="return an int", replacement=replacement)]})
+        c = kit_conductor(root, codex, claude)
+        [d] = c.run(root / TASK, stop_after="contract").disputes
+        c.rule(d.id, "b")
+        # The v1 Task 17 would freeze from that ruling: the whole b under Amended:, its matching hash, no marker.
+        text = decisions.render_contract("clamp-001", 1, (root / TASK).read_text(encoding="utf-8"),
+                                         f"clamplib.clamp(x, lo, hi) -> number\nAmended: {replacement}", [], [])
+        (root / ".parallax/run/clamp-001/contract-v1.md").write_text(text, encoding="utf-8", newline="\n")
+        c.journal.append("contract.frozen", "clamp-001", version=1, sha=sha256_text(text))
+        again, codex, claude = resumed(root, c)
+        out = again.run(root / TASK)
+        self.assertEqual((out.status, out.detail),
+                         ("blocked", "contract v1 does not match clamp-001's interface protocol (whole); "
+                                     "it was written by another version of parallax"))
+        self.assertEqual((codex.calls, claude.calls), ([], []))
+        self.assertEqual(types(again).count("contract.frozen"), 1)
+        self.assertEqual(contract_text(root), text)

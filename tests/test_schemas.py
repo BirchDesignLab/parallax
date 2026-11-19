@@ -1,5 +1,5 @@
 import unittest
-from parallax.schemas import BUILD, READING, RESPOND, REVEAL, WITNESS, validate
+from parallax.schemas import BUILD, READING, RESPOND, REVEAL, REVEAL_AMENDING, WITNESS, validate
 
 GOOD = {"interface": "f(x)", "decisions": [{"question": "q", "answer": "a", "why": "w"}], "predicted_failures": []}
 
@@ -36,7 +36,7 @@ class Validate(unittest.TestCase):
     def test_reveal_verdicts_need_every_witness_field_as_a_string(self):
         empty = {"scenario": "", "observation": "", "theirs": "", "mine": "", "decided_by": ""}
         def reveal_with(witness):
-            return {"interface_ok": True, "interface_objection": "",
+            return {"interface_ok": True, "interface_objection": "", "interface_replacement": "",
                     "verdicts": [{"index": 0, "agree": True, "counter": "", "why": "", "witness": witness}]}
         self.assertEqual(validate(reveal_with(empty), REVEAL), [])
         for field in WITNESS["required"]:
@@ -45,6 +45,18 @@ class Validate(unittest.TestCase):
                 self.assertTrue(any(field in p and "witness" in p for p in problems), problems)
         problems = validate(reveal_with({**empty, "mine": 5}), REVEAL)
         self.assertTrue(any("mine" in p and "string" in p for p in problems), problems)
-        bare = {"interface_ok": True, "interface_objection": "",
+        bare = {"interface_ok": True, "interface_objection": "", "interface_replacement": "",
                 "verdicts": [{"index": 0, "agree": True, "counter": "", "why": ""}]}
-        self.assertTrue(any("witness" in p for p in validate(bare, REVEAL)))
+        self.assertEqual(validate(bare, REVEAL), ["$.verdicts[0]: missing 'witness'"])
+
+    def test_reveal_needs_a_string_replacement_and_the_prior_shape_has_none(self):
+        empty = {"scenario": "", "observation": "", "theirs": "", "mine": "", "decided_by": ""}
+        current = {"interface_ok": True, "interface_objection": "", "interface_replacement": "",
+                   "verdicts": [{"index": 0, "agree": True, "counter": "", "why": "", "witness": empty}]}
+        prior = {k: v for k, v in current.items() if k != "interface_replacement"}
+        self.assertEqual(validate(current, REVEAL), [])
+        self.assertTrue(any("interface_replacement" in p for p in validate(prior, REVEAL)))
+        problems = validate({**current, "interface_replacement": 5}, REVEAL)
+        self.assertTrue(any("interface_replacement" in p and "string" in p for p in problems), problems)
+        self.assertEqual(validate(prior, REVEAL_AMENDING), [])
+        self.assertIn("$: unexpected property 'interface_replacement'", validate(current, REVEAL_AMENDING))

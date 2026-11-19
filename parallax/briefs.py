@@ -100,9 +100,37 @@ After the real implementation is done, write {_plural(n, "mutant")}. A mutant is
 - The conductor moves this folder out before committing your work; it never lands in the project."""
 
 
-def reading(task_text: str, role: str, cfg: Config, precedents: Sequence[dict]) -> str:
-    """Step 2, the sealed reading. Carries nothing from the other seat."""
+_INTERFACE_WHOLE = (
+    "- `interface` (string): the exact interface you expect: every file to create, change or delete on main "
+    "(not Parallax's working files), with paths relative to this folder; the import or entry point; and every "
+    "public name with its full signature and calling conventions. Say what forms a result or an error can take, "
+    "including errors raised by code the caller supplies. Put the conditions that select an outcome, and the "
+    "order of checks, in `decisions`, not here.")
+_DECISIONS_WHOLE = (
+    "- `decisions` (list): one entry for each behavior guarantee or open choice (edge cases, error handling, "
+    "types, naming, behavior at limits). Record each guarantee once, including requirements the task or an "
+    "applicable precedent fixes. When one choice decides several consequences, write one entry whose answer "
+    "states them all; keep policies that can be chosen independently in separate entries. Each entry has "
+    "`question` (the question, stated on its own so it reads clearly out of context), `answer` (what the code "
+    "should do, written so it could go straight into a contract) and `why` (your reason, citing any precedent "
+    "id you applied). Return an empty list when there is no behavior or open choice to record.")
+_INTERFACE_PRIOR = (
+    "- `interface` (string): the exact interface you expect: every file to create, change or delete on main "
+    "(not Parallax's working files), and every public name in it with its full signature, parameters, return "
+    "value and errors raised. Use paths relative to this folder.")
+_DECISIONS_PRIOR = (
+    "- `decisions` (list): one entry for each question the task leaves open (edge cases, error handling, types, "
+    "naming, behavior at limits). Each entry has `question` (the question, stated on its own so it reads clearly "
+    "out of context), `answer` (what the code should do, written so it could go straight into a contract) and "
+    "`why` (your reason, citing any precedent id you applied). If the task is fully clear, return an empty list.")
+
+
+def reading(task_text: str, role: str, cfg: Config, precedents: Sequence[dict], whole: bool = True) -> str:
+    """Step 2, the sealed reading. Carries nothing from the other seat. whole=False is the brief tasks opened
+    before the complete-interface protocol saw."""
     role = _role(role)
+    interface_line, decisions_line = ((_INTERFACE_WHOLE, _DECISIONS_WHOLE) if whole
+                                      else (_INTERFACE_PRIOR, _DECISIONS_PRIOR))
     return _join(
         f"""# Reading: {role}
 
@@ -119,17 +147,17 @@ How the work will be split once the contract is frozen:
         "## The task\n\n" + _block(task_text),
         _precedents(precedents),
         WHAT_LANDS,
-        """## What to return
+        f"""## What to return
 
 Reply with JSON that has exactly these fields:
 
-- `interface` (string): the exact interface you expect: every file to create, change or delete on main (not Parallax's working files), and every public name in it with its full signature, parameters, return value and errors raised. Use paths relative to this folder.
-- `decisions` (list): one entry for each question the task leaves open (edge cases, error handling, types, naming, behavior at limits). Each entry has `question` (the question, stated on its own so it reads clearly out of context), `answer` (what the code should do, written so it could go straight into a contract) and `why` (your reason, citing any precedent id you applied). If the task is fully clear, return an empty list.
+{interface_line}
+{decisions_line}
 - `predicted_failures` (list of strings): where an implementation is most likely to go wrong, one item per risk, each concrete enough to write a test for.""",
     )
 
 
-def reveal(own_role: str, other_reading: dict) -> str:
+def reveal(own_role: str, other_reading: dict, whole: bool = True) -> str:
     """Step 3. The only brief that shows the other seat's reading, and only after both are sealed."""
     own_role = _role(own_role)
     other = _other(own_role)
@@ -140,12 +168,32 @@ def reveal(own_role: str, other_reading: dict) -> str:
                      + " Return exactly one verdict for each index, in order.")
     else:
         per_index = f"The {other}'s reading has no decisions. Return an empty `verdicts` list."
-    if own_role == "challenger":
+    fields = ("`interface_ok` (boolean), `interface_objection` (string) and `interface_replacement` (string)" if whole
+              else "`interface_ok` (boolean) and `interface_objection` (string)")
+    if own_role == "challenger" and whole:
+        interface = ("The builder's interface stands unless you object. Set `interface_ok` to true to accept it, with "
+                     "`interface_objection` and `interface_replacement` as empty strings. To object, set `interface_ok` "
+                     "to false, say why in one or two sentences in `interface_objection`, and put in "
+                     "`interface_replacement` a complete interface that a caller can use on its own. Carry forward each "
+                     "unaffected file, import, public name, signature, calling convention, result form and error form, "
+                     "not only the part you would change. If the human agrees, it replaces the builder's interface as "
+                     "written. Object only when the interface is wrong or ambiguous, not over style. Also object when "
+                     "the interface states a condition or an order of checks that belongs in a decision. Before you "
+                     "remove one, find where the task or a sealed decision states the behavior you mean to keep. If "
+                     "removing it would lose a guarantee, name the gap in `interface_objection` and keep that guarantee "
+                     "in `interface_replacement`. If the only issue is where a guarantee is written and removing it "
+                     "would lose it, accept the builder's interface. If another change warrants a replacement, carry "
+                     "the guarantee into that replacement. Object too if the interface names a file that should not be "
+                     "on main, such as a working copy, scratch file or mutant code.")
+    elif own_role == "challenger":
         interface = ("The builder's interface stands unless you object. Set `interface_ok` to true to accept it. "
                      "To object, set `interface_ok` to false and put in `interface_objection` the exact change you "
                      "want, in one or two sentences: if the human agrees, it is added to the interface as written. "
                      "Object only when the interface is wrong or ambiguous, not over style. Also object if the interface "
                      "names a file that should not be on main, such as a working copy, scratch file or mutant code.")
+    elif whole:
+        interface = ("You are the builder, so your own interface stands. Set `interface_ok` to true and "
+                     "`interface_objection` and `interface_replacement` to empty strings.")
     else:
         interface = ("You are the builder, so your own interface stands. Set `interface_ok` to true and "
                      "`interface_objection` to an empty string.")
@@ -160,7 +208,7 @@ Do not change any file in this step. Your reading is sealed. Below is the {other
 
 Reply with JSON that has exactly these fields:
 
-- `interface_ok` (boolean) and `interface_objection` (string). {interface}
+- {fields}. {interface}
 - `verdicts` (list). {per_index} Each verdict has:
   - `index` (integer): the position of the decision in the {other}'s `decisions` list, starting at 0.
   - `agree` (boolean): true if you accept the {other}'s answer as it stands.

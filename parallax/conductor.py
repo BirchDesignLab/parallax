@@ -67,6 +67,7 @@ class _Task:
     builder: str
     challenger: str
     dir: Path                        # <home>/<repo key>/<task>, private
+    whole: bool = False              # task.opened carried interface_protocol="whole"
 
     def role(self, seat: str) -> str:
         return "builder" if seat == self.builder else "challenger"
@@ -205,6 +206,9 @@ class Conductor:
         if any(e["type"] == "ruling.made" and e.get("dispute") == dispute_id for e in events):
             raise ValueError(f"{dispute_id} is already ruled")
         dispute = Dispute.from_event(opened[-1])
+        whole = (self._first(opened[-1]["task"], "task.opened") or {}).get("interface_protocol") == "whole"
+        if dispute.kind == "interface" and (opened[-1].get("interface_protocol") == "whole") != whole:
+            raise ValueError(self._mismatch(dispute_id, opened[-1]["task"], whole))
         if dispute.kind in ("check", "unresolved") and choice in ("a", "b"):
             text = note.strip() or f"{dispute.a_label if choice == 'a' else dispute.b_label} is right."
         elif dispute.kind == "unresolved" and choice == "drop":
@@ -218,7 +222,7 @@ class Conductor:
         if dispute.kind in ("mutant", "unresolved"):
             scope = "task"
         elif scope is None:
-            scope = decisions.default_scope(dispute.kind)
+            scope = decisions.default_scope(dispute.kind, whole_interface=whole)
         if scope not in ("task", "project"):
             raise ValueError(f"scope must be 'task' or 'project', not {scope!r}")
         self.journal.append("ruling.made", opened[-1]["task"], dispute=dispute_id, kind=dispute.kind,
@@ -269,6 +273,7 @@ class Conductor:
         t = self._open(task, text, builder)
         if t.kind == "chore":
             return self._solo(t)
+        self._check_protocol(t)
         self._readings(t)
         self._reveal(t)
         self._settle(t)
@@ -330,10 +335,12 @@ class Conductor:
                 raise ValueError(f"unknown seat {builder!r}; the seats are {', '.join(names)}")
             challenger = names[1 - names.index(builder)]
             opened = self.journal.append("task.opened", task, kind=kind, base=gitops.rev(self.cfg.root, self.cfg.main),
-                                         builder=builder, challenger=challenger, title=title or task)
+                                         builder=builder, challenger=challenger, title=title or task,
+                                         interface_protocol="whole")
             self.say(f"{task}: opened ({kind}); builder {builder}, challenger {challenger}")
         t = _Task(task, text, opened["kind"], opened["title"], opened["base"], opened["builder"],
-                  opened["challenger"], self.home / repo_key(self.cfg.root) / task)
+                  opened["challenger"], self.home / repo_key(self.cfg.root) / task,
+                  whole=opened.get("interface_protocol") == "whole")
         for seat in t.seats:
             if seat not in self.seats:
                 raise ValueError(f"no seat named {seat!r} was given to the conductor")
@@ -350,7 +357,7 @@ class Conductor:
         self._parallel([lambda seat=seat: self._read(t, seat) for seat in todo])
 
     def _read(self, t: _Task, seat: str) -> None:
-        brief = briefs.reading(t.text, t.role(seat), self.cfg, decisions.precedents(self.events()))
+        brief = briefs.reading(t.text, t.role(seat), self.cfg, decisions.precedents(self.events()), whole=t.whole)
         request = SeatRequest("reading", brief, self._clone_of(t, seat), schemas.READING, writable=False,
                               session=None, out_dir=self._artifact_dir(t, seat, "reading"))
         voids = []
@@ -388,11 +395,14 @@ class Conductor:
             if indexes != list(range(count)):
                 return f"verdicts must give exactly one index for each of 0..{count - 1}, got {indexes}"
             problems = [decisions.witness_problem(v) for v in sorted(output["verdicts"], key=lambda v: v["index"])]
+            if t.whole and t.role(seat) == "challenger":
+                problems.append(decisions.interface_problem(output, other_reading["interface"]))
             return "\n".join(p for p in problems if p) or None
 
-        request = SeatRequest("reveal", briefs.reveal(t.role(seat), other_reading), self._clone_of(t, seat),
-                              schemas.REVEAL, writable=False, session=self._sealed(t, seat)["session"],
-                              out_dir=self._artifact_dir(t, seat, "reveal"))
+        schema = schemas.REVEAL if t.whole else schemas.REVEAL_AMENDING      # module attributes: tests patch them
+        request = SeatRequest("reveal", briefs.reveal(t.role(seat), other_reading, whole=t.whole),
+                              self._clone_of(t, seat), schema, writable=False,
+                              session=self._sealed(t, seat)["session"], out_dir=self._artifact_dir(t, seat, "reveal"))
         result, request = self._call(seat, request, task=t, check=check)
         sha = self._store(request.out_dir, result.output)
         self.journal.append("reveal.done", t.id, seat=seat, sha=sha, usage=result.usage)
@@ -401,8 +411,7 @@ class Conductor:
     # Step 5
     def _settle(self, t: _Task) -> None:
         readings = {seat: self._reading(t, seat) for seat in t.seats}
-        reveals = {seat: self._stored(t, seat, "reveal", self._last(t.id, "reveal.done", seat=seat)["sha"])
-                   for seat in t.seats}
+        reveals = self._reveals(t)
         _, _, disputes = decisions.settle(t.id, t.builder, t.challenger, readings, reveals)
         opened = {e["id"] for e in self.events(t.id) if e["type"] == "dispute.opened"}
         for dispute in disputes:
@@ -427,8 +436,7 @@ class Conductor:
     def _contract_points(self, t: _Task) -> tuple[str, list[Point]]:
         """The interface and decisions of contract v1: agreed points, then the ruled readings."""
         readings = {seat: self._reading(t, seat) for seat in t.seats}
-        reveals = {seat: self._stored(t, seat, "reveal", self._last(t.id, "reveal.done", seat=seat)["sha"])
-                   for seat in t.seats}
+        reveals = self._reveals(t)
         interface, points, disputes = decisions.settle(t.id, t.builder, t.challenger, readings, reveals)
         events = self.events(t.id)
         rulings = {e["dispute"]: e for e in events if e["type"] == "ruling.made"}
@@ -438,15 +446,41 @@ class Conductor:
             if dispute.kind == "reading":
                 points.append(Point(dispute.question, ruling["text"], f"ruled {dispute.id}"))
             elif dispute.kind == "interface" and ruling["choice"] in ("b", "other"):
-                interface = f"{interface}\nAmended: {ruling['text']}"
+                interface = ruling["text"] if t.whole else f"{interface}\nAmended: {ruling['text']}"
         return interface, points
+
+    @staticmethod
+    def _mismatch(what: str, task: str, whole: bool) -> str:
+        return (f"{what} does not match {task}'s interface protocol ({'whole' if whole else 'amending'}); "
+                "it was written by another version of parallax")
+
+    def _reveals(self, t: _Task) -> dict[str, dict]:
+        """Both recorded reveals, by seat. Blocks when the challenger's was written under the other protocol."""
+        reveals = {seat: self._stored(t, seat, "reveal", self._last(t.id, "reveal.done", seat=seat)["sha"])
+                   for seat in t.seats}
+        if ("interface_replacement" in reveals[t.challenger]) != t.whole:
+            raise _Stop(Outcome("blocked", t.id, self._mismatch(f"{t.challenger}'s recorded reveal", t.id, t.whole)))
+        return reveals
+
+    def _check_protocol(self, t: _Task) -> None:
+        """Blocks when a recorded interface card or frozen contract was written under the other protocol."""
+        for e in self.events(t.id):
+            if e["type"] == "dispute.opened" and e.get("kind") == "interface":
+                what = e["id"]
+            elif e["type"] == "contract.frozen":
+                what = f"contract v{e['version']}"
+            else:
+                continue
+            if (e.get("interface_protocol") == "whole") != t.whole:
+                raise _Stop(Outcome("blocked", t.id, self._mismatch(what, t.id, t.whole)))
 
     def _freeze(self, t: _Task, version: int, interface: str, points: Sequence[Point]) -> None:
         # This task's own rulings are already decisions in the contract.
         in_force = [p for p in decisions.precedents(self.events()) if p["task"] != t.id]
         text = decisions.render_contract(t.id, version, t.text, interface, points, in_force)
         self._write(self._run_dir(t) / f"contract-v{version}.md", text)
-        self.journal.append("contract.frozen", t.id, version=version, sha=sha256_text(text))
+        marker = {"interface_protocol": "whole"} if t.whole else {}
+        self.journal.append("contract.frozen", t.id, version=version, sha=sha256_text(text), **marker)
         self.say(f"{t.id}: contract v{version} frozen")
 
     # Step 8
@@ -1240,7 +1274,8 @@ class Conductor:
         return [Dispute.from_event(e) for e in events if e["type"] == "dispute.opened" and e["id"] not in ruled]
 
     def _open_dispute(self, t: _Task, dispute: Dispute) -> None:
-        self.journal.append("dispute.opened", t.id, **dispute.to_fields())
+        marker = {"interface_protocol": "whole"} if t.whole and dispute.kind == "interface" else {}
+        self.journal.append("dispute.opened", t.id, **dispute.to_fields(), **marker)
         self._write(self._run_dir(t) / "cards" / f"{dispute.id}.md", decisions.render_card(dispute))
 
     # ------------------------------------------------------- the state folder

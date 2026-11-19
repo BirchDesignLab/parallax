@@ -1,8 +1,9 @@
 import unittest
 from parallax.gitops import rev
 from parallax.seats.stub import StubSeat
-from tests.conductor_kit import (CLAMP_BAD, CLAMP_OK, FILE, MUTANTS, PROBES, WEAK_PROBES, builds, kit_conductor,
-                                 make_project, probes, reading, responds, reveal, types)
+from tests.conductor_kit import (CLAMP_BAD, CLAMP_OK, COMPARISON, FILE, INTERFACE_A, INTERFACE_B, MUTANTS, PROBES,
+                                 WEAK_PROBES, builds, interface_section, kit_conductor, make_project, probes,
+                                 reading, responds, reveal, types)
 from tests.helpers import run_git
 
 TASK = "tasks/clamp-001.md"
@@ -102,6 +103,42 @@ class Rulings(unittest.TestCase):
         text = message(root)
         self.assertIn("Checks: 4 probes passed, 2 of 3 mutants caught", text)
         self.assertIn("Verdict: limited\nLimitation: mutant m1 waived: covered by an integration test", text)
+
+    def test_a_whole_interface_ruling_survives_the_contract_amendment(self):
+        # The contested-check path of test_both_contest_then_the_human_rules_for_the_challenger,
+        # on a task whose interface was replaced whole before contract v1.
+        # B adds the public alias clip, so the build, the repair, every mutant and the probes carry it.
+        root = make_project()
+        clip = "\nclip = clamp\n"
+        mutants = {name: text + clip for name, text in MUTANTS.items()}
+        clip_probes = (PROBES.replace("from clamplib import clamp\n", "from clamplib import clamp, clip\n")
+                       + "    def test_clip(self):\n        self.assertIs(clip, clamp)\n")
+        codex = StubSeat("codex", {"reading": [reading(COMPARISON, interface=INTERFACE_A)], "reveal": [reveal()],
+                                   "build": [builds(CLAMP_BAD + clip, mutants=mutants)],
+                                   "respond": [responds("contest"),
+                                               responds("concede", files={FILE: CLAMP_OK + clip}, mutants=mutants)]})
+        claude = StubSeat("claude", {"reading": [reading(interface=INTERFACE_B)], "reveal": [
+            reveal((True, ""), interface_ok=False, objection="callers want the short name clip", replacement=INTERFACE_B)],
+                                     "probe": [probes(clip_probes)], "respond": [responds("contest")]})
+        c = kit_conductor(root, codex, claude)
+        out = c.run(root / TASK)
+        self.assertEqual([d.kind for d in out.disputes], ["interface"])
+        c.rule(out.disputes[0].id, "b")
+        out = c.run(root / TASK)
+        self.assertEqual((out.status, [d.kind for d in out.disputes]), ("needs_ruling", ["check"]))
+        check = out.disputes[0].id
+        c.rule(check, "b", note="The upper bound is inclusive.")
+        self.assertEqual(c.run(root / TASK).status, "landed")
+        v1, v2 = ((root / f".parallax/run/clamp-001/contract-v{n}.md").read_text(encoding="utf-8") for n in (1, 2))
+        shared = f"- Q: {COMPARISON['question']}\n  A: {COMPARISON['answer']} (agreed)\n"
+        for text in (v1, v2):
+            self.assertEqual(interface_section(text), INTERFACE_B)
+            self.assertIn(shared, text)
+            self.assertNotIn("Amended:", text)
+        self.assertNotIn("The upper bound is inclusive.", v1)
+        self.assertIn(f"A: The upper bound is inclusive. (ruled {check})", v2)
+        self.assertIn("clip = clamp", (root / FILE).read_text(encoding="utf-8"))
+        self.assertIn("def test_clip", (root / "tests/test_clamp.py").read_text(encoding="utf-8"))
 
 class Exhaustion(unittest.TestCase):
     def stuck(self):
