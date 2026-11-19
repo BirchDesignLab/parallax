@@ -366,7 +366,8 @@ class Conductor:
             self.say(f"{t.id}: {seat}'s reading named the other seat's folder; voided")
             if len(voids) >= 2:
                 raise _Stop(Outcome("blocked", t.id, f"{seat}'s reading was voided twice: it named {', '.join(hits)}"))
-            return replace(request, cwd=fresh, session=None, out_dir=self._artifact_dir(t, seat, "reading"))
+            return replace(request, brief=brief, cwd=fresh, session=None,
+                           out_dir=self._artifact_dir(t, seat, "reading"))
 
         result, request = self._call(seat, request, task=t, void=void)
         sha = self._store(request.out_dir, result.output)
@@ -386,7 +387,8 @@ class Conductor:
             indexes = sorted(v["index"] for v in output["verdicts"])
             if indexes != list(range(count)):
                 return f"verdicts must give exactly one index for each of 0..{count - 1}, got {indexes}"
-            return None
+            problems = [decisions.witness_problem(v) for v in sorted(output["verdicts"], key=lambda v: v["index"])]
+            return "\n".join(p for p in problems if p) or None
 
         request = SeatRequest("reveal", briefs.reveal(t.role(seat), other_reading), self._clone_of(t, seat),
                               schemas.REVEAL, writable=False, session=self._sealed(t, seat)["session"],
@@ -1152,13 +1154,16 @@ class Conductor:
         - After every call the event stream is audited for the other seat's clones. On a hit,
           `void(request, result, hits)` cleans up and returns the request to run instead (it
           raises `_Stop` itself to give up); with no `void`, a hit blocks the task.
-        - Bad output (`not result.ok`, or `check(output)` returning a reason) is retried once
-          with the same request; a second failure appends `seat.failed` and blocks.
+        - Bad output (`not result.ok`, or `check(output)` returning a reason) is retried once;
+          a second failure appends `seat.failed` and blocks. A seat error retries the same
+          request. A `check` rejection retries with the brief of the request this call was given
+          (or last returned by `void`) plus `briefs.rejected(brief, reason)`, so reasons never stack.
 
         Exceptions a seat raises propagate unchanged. Every other way out is `_Stop`.
         """
         t = task
         failures = 0
+        base = request.brief
         while True:
             if not folders.is_private(t.dir):
                 raise _Stop(Outcome("blocked", t.id, "the task's state folder is no longer private"))
@@ -1175,6 +1180,7 @@ class Conductor:
                     self.journal.append("seat.failed", t.id, stage=request.stage, seat=seat, error=error)
                     raise _Stop(Outcome("blocked", t.id, f"{seat} failed at {request.stage}: {error}"))
                 request = void(request, result, hits)
+                base = request.brief
                 failures = 0
                 continue
             error = result.error if not result.ok else (check(result.output) if check else None)
@@ -1183,6 +1189,8 @@ class Conductor:
             error = error or "the seat returned no output"
             failures += 1
             if failures < 2:
+                if result.ok:
+                    request = replace(request, brief=briefs.rejected(base, error))
                 continue
             self.journal.append("seat.failed", t.id, stage=request.stage, seat=seat, error=error)
             self.say(f"{t.id}: {seat} failed at {request.stage}: {error}")

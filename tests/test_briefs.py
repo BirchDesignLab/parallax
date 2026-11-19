@@ -22,6 +22,21 @@ class Briefs(unittest.TestCase):
             "retry": briefs.retry("you changed files outside your paths: tests/sneaky.py"),
         }
 
+    def test_reveal_asks_for_a_witness_and_never_to_agree_to_a_contradicted_answer(self):
+        text = self.all["reveal"]
+        for part in ("`witness` (object)", "`scenario`", "`observation`", "`theirs`", "`mine`", "`decided_by`",
+                     "exactly `no commitment`", "copy its question verbatim",
+                     "Agree when you accept the builder's whole answer as written",
+                     "Never agree to an answer you believe is contradicted"):
+            self.assertIn(part, text)
+
+    def test_rejected_appends_the_reason_and_scrubs_paths(self):
+        text = briefs.rejected("# Reveal\nbody", r"verdict 0: missing scenario (see C:\Users\x\clone)")
+        self.assertTrue(text.startswith("# Reveal\nbody"))
+        self.assertIn("## Your last reply was rejected", text)
+        self.assertIn("verdict 0: missing scenario", text)
+        self.assertIsNone(ABSOLUTE.search(text))
+
     def test_every_brief_carries_the_rules_and_no_absolute_path(self):
         for name, text in self.all.items():
             if name != "retry":

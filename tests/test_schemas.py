@@ -1,5 +1,5 @@
 import unittest
-from parallax.schemas import BUILD, READING, RESPOND, validate
+from parallax.schemas import BUILD, READING, RESPOND, REVEAL, WITNESS, validate
 
 GOOD = {"interface": "f(x)", "decisions": [{"question": "q", "answer": "a", "why": "w"}], "predicted_failures": []}
 
@@ -32,3 +32,19 @@ class Validate(unittest.TestCase):
 
     def test_booleans_are_not_integers(self):
         self.assertTrue(validate({"index": True}, {"type": "object", "properties": {"index": {"type": "integer"}}, "required": ["index"], "additionalProperties": False}))
+
+    def test_reveal_verdicts_need_every_witness_field_as_a_string(self):
+        empty = {"scenario": "", "observation": "", "theirs": "", "mine": "", "decided_by": ""}
+        def reveal_with(witness):
+            return {"interface_ok": True, "interface_objection": "",
+                    "verdicts": [{"index": 0, "agree": True, "counter": "", "why": "", "witness": witness}]}
+        self.assertEqual(validate(reveal_with(empty), REVEAL), [])
+        for field in WITNESS["required"]:
+            with self.subTest(missing=field):
+                problems = validate(reveal_with({k: v for k, v in empty.items() if k != field}), REVEAL)
+                self.assertTrue(any(field in p and "witness" in p for p in problems), problems)
+        problems = validate(reveal_with({**empty, "mine": 5}), REVEAL)
+        self.assertTrue(any("mine" in p and "string" in p for p in problems), problems)
+        bare = {"interface_ok": True, "interface_objection": "",
+                "verdicts": [{"index": 0, "agree": True, "counter": "", "why": ""}]}
+        self.assertTrue(any("witness" in p for p in validate(bare, REVEAL)))

@@ -115,9 +115,16 @@ def stub_seats() -> dict[str, Seat]:
         return lambda req: {"interface": "clamplib.clamp(x, lo, hi) -> number",
                             "decisions": list(decisions), "predicted_failures": []}
 
+    empty = {"scenario": "", "observation": "", "theirs": "", "mine": "", "decided_by": ""}
+    reversed_bounds = {"scenario": "clamp(5, 10, 1)", "observation": "what the call returns or raises",
+                       "theirs": "raises ValueError", "mine": "returns 5", "decided_by": ""}
+
     def reveal(*verdicts):
+        why = "Treat the bounds in either order so the same interval is accepted."
         return lambda req: {"interface_ok": True, "interface_objection": "",
-                            "verdicts": [{"index": i, "agree": agree, "counter": counter, "why": ""}
+                            "verdicts": [{"index": i, "agree": agree, "counter": counter,
+                                          "why": "" if agree else why,
+                                          "witness": dict(empty if agree else reversed_bounds)}
                                          for i, (agree, counter) in enumerate(verdicts)]}
 
     def build(req):

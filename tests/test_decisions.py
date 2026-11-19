@@ -1,6 +1,6 @@
 import unittest
 from parallax.decisions import (Dispute, Point, default_scope, precedents, render_card, render_contract,
-                                render_precedents, ruling_text, settle)
+                                render_precedents, ruling_text, settle, witness_problem)
 
 READINGS = {
     "codex": {"interface": "clamplib.clamp(x, lo, hi)", "predicted_failures": [],
@@ -24,9 +24,11 @@ class Settle(unittest.TestCase):
         self.assertEqual(points, [Point("NaN input?", "return NaN", "agreed")])
         self.assertEqual(disputes, [
             Dispute("D-clamp-001-1", "reading", "What if lo > hi?", "raise ValueError", "swap the bounds",
-                    "codex (builder)", "claude (challenger)"),
+                    "codex (builder)", "claude (challenger)",
+                    "Reasons:\n  a) codex: caller error\n  b) claude: forgiving"),
             Dispute("D-clamp-001-2", "reading", "Strings?", "compare as given", "raise TypeError",
-                    "codex (builder)", "claude (challenger)"),
+                    "codex (builder)", "claude (challenger)",
+                    "Reasons:\n  a) codex: duck typing\n  b) claude: numbers only"),
         ])
 
     def test_interface_objection_is_numbered_last_and_start_is_honored(self):
@@ -35,6 +37,7 @@ class Settle(unittest.TestCase):
         self.assertEqual([d.id for d in disputes], ["D-clamp-001-5", "D-clamp-001-6", "D-clamp-001-7"])
         self.assertEqual((disputes[-1].kind, disputes[-1].a, disputes[-1].b),
                          ("interface", "clamplib.clamp(x, lo, hi)", "name them lo and hi"))
+        self.assertEqual(disputes[-1].evidence, "")
 
     def test_missing_verdict_is_an_error(self):
         reveals = {**REVEALS, "codex": {**REVEALS["codex"], "verdicts": REVEALS["codex"]["verdicts"][:1]}}
@@ -106,3 +109,105 @@ class Rendering(unittest.TestCase):
         card = render_card(Dispute("D-t-1", "check", "q", "A", "B", "x", "y", evidence))
         self.assertIn("<outside>/test_a.py", card)
         self.assertNotIn("First Last", card)
+
+
+W = {"scenario": "clamp(5, 10, 1)", "observation": "result", "theirs": "raises ValueError", "mine": "returns 5", "decided_by": ""}
+EMPTY = {"scenario": "", "observation": "", "theirs": "", "mine": "", "decided_by": ""}
+
+def reveal_of(*verdicts):
+    return {"interface_ok": True, "interface_objection": "", "verdicts": list(verdicts)}
+
+class Witness(unittest.TestCase):
+    def v(self, agree=False, **witness):
+        return {"index": 2, "agree": agree, "counter": "c", "why": "", "witness": {**W, **witness}}
+
+    def test_agreeing_verdicts_are_not_checked_whatever_the_witness_holds(self):
+        self.assertIsNone(witness_problem({"index": 0, "agree": True, "counter": "", "why": ""}))
+        self.assertIsNone(witness_problem(self.v(agree=True, theirs="same", mine="same")))
+
+    def test_a_disagreement_needs_every_field(self):
+        self.assertEqual(witness_problem(self.v(scenario=" ", mine="")),
+                         "verdict 2: a disagreement needs a witness with scenario, observation, theirs and mine; missing scenario, mine")
+        no_witness = {"index": 1, "agree": False, "counter": "c", "why": ""}
+        self.assertEqual(witness_problem(no_witness),
+                         "verdict 1: a disagreement needs a witness with scenario, observation, theirs and mine; "
+                         "missing scenario, observation, theirs, mine")
+
+    def test_identical_results_are_rejected(self):
+        self.assertEqual(witness_problem(self.v(theirs="returns 5 ", mine=" returns 5")),
+                         "verdict 2: the witness predicts the same result under both answers (returns 5); "
+                         "give a scenario where the two answers commit to different results, "
+                         "or agree if you accept their whole answer")
+
+    def test_results_that_differ_only_in_case_or_spelling_are_accepted(self):
+        for theirs, mine in (("returns undefined", "returns null"), ('prints "ok"', 'prints "OK"')):
+            self.assertIsNone(witness_problem(self.v(theirs=theirs, mine=mine)))
+
+    def test_a_cited_contradiction_reaches_the_card_in_either_role_assignment(self):
+        # The D-2 shape: codex's identity rule is accepted, claude's lo == hi answer contradicts it,
+        # and codex disputes that answer citing the identity rule's question verbatim.
+        identity = {"question": "What happens when x equals a bound?",
+                    "answer": "Return x itself, preserving its type.", "why": "identity matters"}
+        equal = {"question": "What happens when lo equals hi?", "answer": "Return lo for any x.", "why": "simpler to state"}
+        counter = "Return x when it compares equal to both bounds."
+        readings = {"codex": {"interface": "i", "predicted_failures": [], "decisions": [identity]},
+                    "claude": {"interface": "i", "predicted_failures": [], "decisions": [equal]}}
+        reveals = {"claude": reveal_of({"index": 0, "agree": True, "counter": "", "why": "", "witness": EMPTY}),
+                   "codex": reveal_of({"index": 0, "agree": False, "counter": counter,
+                                       "why": "it contradicts the accepted identity rule",
+                                       "witness": {"scenario": "clamp(5, 5.0, 5.0)", "observation": "the returned value and its type",
+                                                   "theirs": "5.0 (float)", "mine": "5 (int)",
+                                                   "decided_by": identity["question"]}})}
+        expected = {
+            "codex": ((counter, equal["answer"]),
+                      "  Under a (codex), codex predicts: 5 (int)\n  Under b (claude), codex predicts: 5.0 (float)\n",
+                      "  a) codex: it contradicts the accepted identity rule\n  b) claude: simpler to state"),
+            "claude": ((equal["answer"], counter),
+                       "  Under a (claude), codex predicts: 5.0 (float)\n  Under b (codex), codex predicts: 5 (int)\n",
+                       "  a) claude: simpler to state\n  b) codex: it contradicts the accepted identity rule"),
+        }
+        for builder, challenger in (("codex", "claude"), ("claude", "codex")):
+            with self.subTest(builder=builder):
+                _, points, disputes = settle("t-1", builder, challenger, readings, reveals)
+                self.assertEqual(points, [Point(identity["question"], identity["answer"], "agreed")])
+                [d] = [d for d in disputes if d.question == equal["question"]]
+                answers, predictions, reasons = expected[builder]
+                self.assertEqual((d.a, d.b), answers)
+                self.assertEqual(d.evidence,
+                                 "Witness, written by codex:\n  Scenario: clamp(5, 5.0, 5.0)\n"
+                                 "  Observe: the returned value and its type\n" + predictions +
+                                 "  codex cites: What happens when x equals a bound?\nReasons:\n" + reasons)
+
+    def test_no_commitment_follows_the_owner_in_either_role_assignment(self):
+        silent = {"question": "What happens with NaN as lo or hi?", "answer": "Unspecified; probes will not test it.",
+                  "why": "out of scope for this task"}
+        requirement = "Raise ValueError, because lo <= hi is false."
+        readings = {"codex": {"interface": "i", "predicted_failures": [], "decisions": []},
+                    "claude": {"interface": "i", "predicted_failures": [], "decisions": [silent]}}
+        reveals = {"claude": reveal_of(),
+                   "codex": reveal_of({"index": 0, "agree": False, "counter": requirement, "why": "the bound check must hold",
+                                       "witness": {"scenario": "clamp(0.5, float('nan'), 1.0)",
+                                                   "observation": "what the call returns or raises",
+                                                   "theirs": "no commitment", "mine": "raises ValueError", "decided_by": ""}})}
+        for builder, challenger, a_line, b_line in (
+                ("codex", "claude", "Under a (codex), codex predicts: raises ValueError",
+                 "Under b (claude), codex predicts: no commitment"),
+                ("claude", "codex", "Under a (claude), codex predicts: no commitment",
+                 "Under b (codex), codex predicts: raises ValueError")):
+            with self.subTest(builder=builder):
+                [d] = settle("t-1", builder, challenger, readings, reveals)[2]
+                self.assertEqual((d.a, d.b), (requirement, silent["answer"]) if builder == "codex" else (silent["answer"], requirement))
+                self.assertIn("Witness, written by codex:", d.evidence)
+                self.assertIn(a_line, d.evidence)
+                self.assertIn(b_line, d.evidence)
+                self.assertNotIn("cites:", d.evidence)
+                self.assertIn("claude: out of scope for this task", d.evidence)
+                self.assertIn("codex: the bound check must hold", d.evidence)
+
+    def test_an_empty_reason_reads_none_given(self):
+        readings = {"codex": {"interface": "i", "predicted_failures": [],
+                              "decisions": [{"question": "q", "answer": "x", "why": ""}]},
+                    "claude": {"interface": "i", "predicted_failures": [], "decisions": []}}
+        reveals = {"codex": reveal_of(), "claude": reveal_of({"index": 0, "agree": False, "counter": "y", "why": "", "witness": W})}
+        [d] = settle("t-1", "codex", "claude", readings, reveals)[2]
+        self.assertTrue(d.evidence.endswith("Reasons:\n  a) codex: (none given)\n  b) claude: (none given)"))

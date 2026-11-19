@@ -166,8 +166,9 @@ Reply with JSON that has exactly these fields:
   - `agree` (boolean): true if you accept the {other}'s answer as it stands.
   - `counter` (string): when you disagree, your answer to the same question, written so it could go straight into a contract; empty when you agree.
   - `why` (string): your reason when you disagree; may be empty when you agree.
+  - `witness` (object): when you disagree, one concrete scenario and what each answer commits to on the same observation. `scenario` is the setup and actions, as concrete as a test: literal inputs, and a sequence of steps when one call cannot show it. `observation` is what to inspect (a returned value and its type, an exception type, output, a file, state). `theirs` is what the {other}'s answer commits to there, or exactly `no commitment` when it leaves that observation open. `mine` is what your counter commits to there. `decided_by` is empty, or the question of another decision, copied verbatim from either reading, that supports your objection. When you agree, all five are empty strings.
 
-Points you both accept are settled. Points you hold against each other go to the human, who sees both answers and both reasons. Agree when the {other}'s answer is acceptable even if it differs from yours in wording; disagree when it would change behavior.""",
+Points you both accept are settled. Points you hold against each other go to the human, who sees the witness, both answers and both reasons. Agree when you accept the {other}'s whole answer as written, including when you have no competing requirement and can grant that answer. Differences in wording, emphasis or justification alone are agreement. For a disagreement, give one concrete scenario and say what each answer commits to on the same observation. If their answer leaves that observation open and you require an outcome, put exactly `no commitment` in `theirs`, state your requirement in `counter` and its observable result in `mine`. If another decision supports your objection, copy its question verbatim from either reading into `decided_by` and keep this verdict in disagreement. Never agree to an answer you believe is contradicted: agreement puts that answer into the contract as written.""",
     )
 
 
@@ -315,6 +316,17 @@ Reply with JSON that has exactly these fields:
 - `blocked` (string): empty when you finished; otherwise exactly what stops you.
 """ + FILES_FIELD,
     )
+
+
+def rejected(brief: str, reason: str) -> str:
+    """`brief` followed by why the conductor rejected the last reply."""
+    return _join(brief, f"""## Your last reply was rejected
+
+The conductor rejected your last reply for this reason:
+
+{_block(reason)}
+
+Fix exactly that and reply again, with JSON in the same format as asked above.""")
 
 
 def retry(reason: str) -> str:

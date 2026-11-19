@@ -73,6 +73,47 @@ class Dispute:
                           if field.name != "evidence"}, evidence=event.get("evidence", ""))
 
 
+def witness_problem(verdict: dict) -> str | None:
+    """Why a verdict's witness is unusable, or None: agreeing verdicts and witnesses that show a difference pass."""
+    if verdict["agree"]:
+        return None
+    index = verdict["index"]
+    witness = verdict.get("witness") or {}
+    missing = [name for name in ("scenario", "observation", "theirs", "mine") if not witness.get(name, "").strip()]
+    if missing:
+        return (f"verdict {index}: a disagreement needs a witness with scenario, observation, theirs and mine; "
+                f"missing {', '.join(missing)}")
+    theirs, mine = witness["theirs"].strip(), witness["mine"].strip()
+    if theirs == mine:
+        return (f"verdict {index}: the witness predicts the same result under both answers ({theirs}); "
+                f"give a scenario where the two answers commit to different results, "
+                f"or agree if you accept their whole answer")
+    return None
+
+
+def _evidence(owner: str, reviewer: str, builder: str, challenger: str, decision: dict, verdict: dict) -> str:
+    witness = verdict.get("witness") or {}
+
+    def field(name: str) -> str:
+        return _text(witness.get(name, ""), name).strip()
+
+    theirs, mine = field("theirs"), field("mine")
+    pred_a, pred_b = (theirs, mine) if owner == builder else (mine, theirs)
+    own_why = _text(decision["why"], "why").strip() or "(none given)"
+    their_why = _text(verdict["why"], "why").strip() or "(none given)"
+    why_a, why_b = (own_why, their_why) if owner == builder else (their_why, own_why)
+    lines = []
+    if field("scenario"):
+        lines += [f"Witness, written by {reviewer}:", f"  Scenario: {field('scenario')}",
+                  f"  Observe: {field('observation')}",
+                  f"  Under a ({builder}), {reviewer} predicts: {pred_a}",
+                  f"  Under b ({challenger}), {reviewer} predicts: {pred_b}"]
+        if field("decided_by"):
+            lines.append(f"  {reviewer} cites: {field('decided_by')}")
+    lines += ["Reasons:", f"  a) {builder}: {why_a}", f"  b) {challenger}: {why_b}"]
+    return "\n".join(lines)
+
+
 def settle(task: str, builder: str, challenger: str, readings: dict[str, dict],
            reveals: dict[str, dict], start: int = 1) -> tuple[str, list[Point], list[Dispute]]:
     _task(task)
@@ -112,7 +153,8 @@ def settle(task: str, builder: str, challenger: str, readings: dict[str, dict],
                 counter = _text(verdict["counter"], "counter")
                 a, b = (answer, counter) if owner == builder else (counter, answer)
                 disputes.append(Dispute(f"D-{task}-{start + len(disputes)}", "reading",
-                                        question, a, b, *labels))
+                                        question, a, b, *labels,
+                                        _evidence(owner, reviewer, builder, challenger, decision, verdict)))
     reveal = reveals[challenger]
     if type(reveal.get("interface_ok")) is not bool:
         raise ValueError("interface_ok must be a boolean")

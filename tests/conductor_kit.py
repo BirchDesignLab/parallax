@@ -45,11 +45,29 @@ def kit_conductor(root: Path, codex: StubSeat, claude: StubSeat) -> Conductor:
 def reading(*decisions, interface="clamplib.clamp(x, lo, hi) -> number"):
     return lambda req: {"interface": interface, "decisions": list(decisions), "predicted_failures": []}
 
+EMPTY_WITNESS = {"scenario": "", "observation": "", "theirs": "", "mine": "", "decided_by": ""}
+_REVERSED_WITNESS = {"scenario": "clamp(5, 10, 1)", "observation": "what the call returns or raises",
+                     "theirs": "raises ValueError", "mine": "returns 5", "decided_by": ""}
+
 def reveal(*verdicts, interface_ok=True, objection=""):
-    """Each verdict is (agree, counter) for the other seat's decision at that position."""
+    """Each verdict is (agree, counter) or (agree, counter, witness) for the other seat's decision at that position.
+
+    An agreeing verdict gets an empty witness. A disagreeing one without a witness gets the
+    reversed-bounds witness when its counter is "swap the bounds"; any other must give one.
+    """
+    def witness_of(verdict):
+        agree, counter, *rest = verdict
+        if rest:
+            return rest[0]
+        if agree:
+            return dict(EMPTY_WITNESS)
+        if counter == "swap the bounds":
+            return dict(_REVERSED_WITNESS)
+        raise ValueError("conductor_kit.reveal: give a witness for this disagreement")
+    witnesses = [witness_of(v) for v in verdicts]
     return lambda req: {"interface_ok": interface_ok, "interface_objection": objection,
-                        "verdicts": [{"index": i, "agree": agree, "counter": counter, "why": ""}
-                                     for i, (agree, counter) in enumerate(verdicts)]}
+                        "verdicts": [{"index": i, "agree": v[0], "counter": v[1], "why": "", "witness": witnesses[i]}
+                                     for i, v in enumerate(verdicts)]}
 
 def _mutant_list(mutants):
     return [{"id": name, "description": name, "files": [FILE]} for name in mutants]
