@@ -21,13 +21,14 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from parallax import audit, briefs, decisions, delivery, folders, gitops, receipt, schemas, scopes
+from parallax import audit, batch, briefs, decisions, delivery, folders, gitops, receipt, redact, schemas, scopes
 from parallax.config import Config, repo_key, state_home
 from parallax.crossing import cross, validate_mutants
 from parallax.decisions import Dispute, Point
 from parallax.ledger import Journal, parse_lines, publish, sha256_text
 from parallax.procs import run_command
 from parallax.redact import scrub_paths
+from parallax.schemas import validate
 from parallax.seats.base import Seat, SeatRequest, SeatResult
 
 _TASK_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -154,6 +155,77 @@ def _no_bytecode_env() -> dict[str, str]:
 
 def _add_usage(a: Mapping[str, int], b: Mapping[str, int]) -> dict:
     return {k: a.get(k, 0) + b.get(k, 0) for k in {*a, *b}}
+
+
+_BATCH_PROTOCOL = "confirmed-v1"
+_PROPOSE, _REVIEW = "batch_propose", "batch_review"
+_PRECEDENT_FIELDS = ("id", "question", "ruling", "while", "task")
+
+
+def _route(packet: dict) -> str:
+    return decisions.route(packet["sources"], {role: {"conflicts": packet["conflicts"][role]}
+                                               for role in ("builder", "challenger")})
+
+
+def _sha_ok(value) -> bool:
+    return isinstance(value, str) and value.startswith("sha256:") and len(value) > len("sha256:")
+
+
+def _usage_ok(usage) -> bool:
+    return isinstance(usage, dict) and all(type(n) is int for n in usage.values())
+
+
+def _opening_sha(t: _Task) -> str:
+    """Binds a batch checkpoint to its opening: the packet holds the task text, not its ID, base or seats."""
+    return batch.digest({"task": t.id, "base": t.base, "seats": {"builder": t.builder, "challenger": t.challenger}})
+
+
+def _reveal_lines(role: str, reveal: dict, readings: dict, keys: list[str]) -> str | None:
+    lines = [decisions.witness_problem(v) for v in sorted(reveal["verdicts"], key=lambda v: v["index"])]
+    if role == "challenger":
+        lines.append(decisions.interface_problem(reveal, readings["builder"]["interface"]))
+    lines.append(decisions.conflict_problem(reveal, keys))
+    return "\n".join(line for line in lines if line) or None
+
+
+def _reveal_problem(role: str, reveal: dict, readings: dict, keys: list[str]) -> str | None:
+    """Why a recorded reveal cannot enter a confirmed-v1 settlement, or None.
+
+    The witness, interface and conflict checks run on the recorded words, then on the words the
+    packet will show (scrubbed), so a distinction lost to scrubbing is caught before any call.
+    """
+    problems = validate(reveal, schemas.REVEAL_CONFIRMED)
+    if problems:
+        return "; ".join(problems)
+    other = readings["challenger" if role == "builder" else "builder"]
+    count = len(other["decisions"])
+    indexes = sorted(v["index"] for v in reveal["verdicts"])
+    if indexes != list(range(count)):
+        return f"verdicts must give exactly one index for each of 0..{count - 1}, got {indexes}"
+    raw = _reveal_lines(role, reveal, readings, keys)
+    if raw:
+        return raw
+    shown = _reveal_lines(role, redact.scrub_values(reveal), redact.scrub_values(readings), keys)
+    return f"after scrubbing: {shown}" if shown else None
+
+
+def _precedents_ok(precedents) -> bool:
+    return isinstance(precedents, list) and all(
+        isinstance(p, dict) and set(p) == set(_PRECEDENT_FIELDS) and all(isinstance(v, str) for v in p.values())
+        for p in precedents)
+
+
+def _checkpoint_problem(event: dict, seat: str, role: str) -> str | None:
+    """What is wrong with a batch checkpoint's envelope, or None."""
+    if event.get("batch_protocol") != _BATCH_PROTOCOL:
+        return f"is not marked batch_protocol {_BATCH_PROTOCOL}"
+    if event.get("seat") != seat:
+        return f"was not written by the {role} {seat}"
+    if not _sha_ok(event.get("sha")) or not _sha_ok(event.get("packet_sha")):
+        return "has no sha"
+    if not _usage_ok(event.get("usage")):
+        return "has malformed usage"
+    return None
 
 
 class Conductor:
@@ -417,6 +489,206 @@ class Conductor:
         for dispute in disputes:
             if dispute.id not in opened:
                 self._open_dispute(t, dispute)
+
+    # Step 5b (Task 19.3): not yet reached by run
+    def _confirm(self, t: _Task) -> dict:
+        """Task 19.3: the settlement of the sealed readings and confirmed reveals. Publishes nothing.
+
+        A direct route settles with no calls. A batch route asks the builder for a proposal, then the
+        challenger for a review, each read-only and checkpointed; a completed checkpoint is verified and
+        reused, never asked again. Every way to stop is `_Stop` with a blocked outcome, and verifying
+        never changes the journal or an artifact.
+        """
+        events = self.events(t.id)
+        readings, reveals, inputs, last_reveal = self._confirm_inputs(t, events)
+        proposed, reviewed = self._batch_checkpoints(t, events, last_reveal)
+        if proposed is None:
+            in_force = [p for p in decisions.precedents(self.events()) if p["task"] != t.id]
+            packet = self._batch_packet(t, in_force, readings, reveals, inputs)
+            if _route(packet) == "direct":
+                try:
+                    return batch.direct_settlement(packet)
+                except ValueError as exc:
+                    raise _Stop(Outcome("blocked", t.id, str(exc))) from None
+            proposal, proposed = self._propose(t, packet)
+        else:
+            packet, proposal = self._verified_proposal(t, proposed, readings, reveals, inputs)
+        if reviewed is None:
+            review = self._review_proposal(t, packet, proposal, proposed)
+        else:
+            review = self._verified_review(t, reviewed, proposed, packet, proposal)
+        return batch.confirmed_settlement(packet, proposal, review)
+
+    def _confirm_inputs(self, t: _Task, events: list[dict]) -> tuple[dict, dict, dict, int]:
+        """Both sealed readings and both confirmed reveals, by role, their shas, and where the later reveal is.
+
+        Each seat's effective seal and reveal are its last `reading.sealed` and `reveal.done`. Both seals
+        must come before both reveals, so a reveal is never paired with a reading resealed after it.
+        """
+        def blocked(detail: str) -> _Stop:
+            return _Stop(Outcome("blocked", t.id, detail))
+
+        seals, reveals_done = {}, {}
+        for i, event in enumerate(events):
+            if event.get("seat") in t.seats and event["type"] == "reading.sealed":
+                seals[event["seat"]] = (i, event)
+            elif event.get("seat") in t.seats and event["type"] == "reveal.done":
+                reveals_done[event["seat"]] = (i, event)
+        for seat in t.seats:
+            if seat not in seals or seat not in reveals_done:
+                raise blocked(f"{seat} has no sealed reading and reveal to settle")
+        if max(i for i, _ in seals.values()) > min(i for i, _ in reveals_done.values()):
+            raise blocked("the recorded reveals do not follow both sealed readings")
+        readings, reveals, inputs = {}, {}, {}
+        for seat in t.seats:
+            sealed, done = seals[seat][1], reveals_done[seat][1]
+            if not _sha_ok(sealed.get("sha")):
+                raise blocked(f"{seat}'s reading.sealed has no sha")
+            if not _sha_ok(done.get("sha")):
+                raise blocked(f"{seat}'s reveal.done has no sha")
+            if done.get("batch_protocol") != _BATCH_PROTOCOL:
+                raise blocked(f"{seat}'s reveal.done is not marked batch_protocol {_BATCH_PROTOCOL}")
+            role = t.role(seat)
+            readings[role] = self._artifact(t, seat, "reading", sealed["sha"])
+            problems = validate(readings[role], schemas.READING)
+            if problems:
+                raise blocked(f"{seat}'s sealed reading is not a valid reading: {'; '.join(problems)}")
+            reveals[role] = self._artifact(t, seat, "reveal", done["sha"])
+            inputs[role] = {"reading": sealed["sha"], "reveal": done["sha"]}
+        keys = decisions.source_keys(readings)
+        for seat in t.seats:
+            problem = _reveal_problem(t.role(seat), reveals[t.role(seat)], readings, keys)
+            if problem:
+                raise blocked(f"{seat}'s recorded reveal is not a confirmed-v1 reveal: {problem}")
+        return readings, reveals, inputs, max(i for i, _ in reveals_done.values())
+
+    def _artifact(self, t: _Task, seat: str, stage: str, sha: str):
+        """`_stored`, with an artifact that is not JSON as a blocked outcome rather than an exception."""
+        try:
+            return self._stored(t, seat, stage, sha)
+        except ValueError:
+            raise _Stop(Outcome("blocked", t.id, f"the recorded {stage} of {seat} is not valid JSON")) from None
+
+    def _batch_packet(self, t: _Task, precedents: list, readings: dict, reveals: dict, inputs: dict) -> dict:
+        try:
+            return batch.packet(t.text, precedents, readings, reveals, inputs,
+                                {"builder": t.builder, "challenger": t.challenger})
+        except ValueError as exc:
+            raise _Stop(Outcome("blocked", t.id, str(exc))) from None
+
+    def _batch_checkpoints(self, t: _Task, events: list[dict], last_reveal: int) -> tuple[dict | None, dict | None]:
+        """The task's batch.proposed and batch.reviewed: at most one each, after both reveals, in that order."""
+        found = {}
+        for kind in ("batch.proposed", "batch.reviewed"):
+            matches = [i for i, e in enumerate(events) if e["type"] == kind]
+            if len(matches) > 1:
+                raise _Stop(Outcome("blocked", t.id, f"{t.id} has {len(matches)} {kind} checkpoints"))
+            found[kind] = matches[0] if matches else None
+        p, r = found["batch.proposed"], found["batch.reviewed"]
+        if r is not None and (p is None or r < p):
+            raise _Stop(Outcome("blocked", t.id, "the batch.reviewed checkpoint has no batch.proposed before it"))
+        if p is not None and p < last_reveal:
+            raise _Stop(Outcome("blocked", t.id, "the batch.proposed checkpoint comes before a recorded reveal"))
+        return (events[p] if p is not None else None), (events[r] if r is not None else None)
+
+    def _session_for_call(self, t: _Task, seat: str) -> str:
+        session = self._sealed(t, seat).get("session")
+        if not isinstance(session, str) or not session:
+            raise _Stop(Outcome("blocked", t.id, f"{seat}'s sealed reading has no session to resume"))
+        return session
+
+    def _propose(self, t: _Task, packet: dict) -> tuple[dict, dict]:
+        packet_sha = batch.digest(packet)
+        seat = t.builder
+        session = self._session_for_call(t, seat)
+        request = SeatRequest(_PROPOSE, briefs.propose(packet, packet_sha), self._clone_of(t, seat), schemas.PROPOSAL,
+                              writable=False, session=session, out_dir=self._artifact_dir(t, seat, _PROPOSE))
+        result, request = self._call(
+            seat, request, task=t, check=lambda raw: batch.proposal_problem(batch.accepted(raw), packet, packet_sha))
+        proposal = batch.accepted(result.output)
+        sha = self._store(request.out_dir, proposal)
+        event = self.journal.append("batch.proposed", t.id, batch_protocol=_BATCH_PROTOCOL, seat=seat, opening=_opening_sha(t),
+                                    packet=packet, packet_sha=packet_sha, sha=sha, usage=result.usage)
+        self.say(f"{t.id}: {seat} proposed the settlement")
+        return proposal, event
+
+    def _verified_reply(self, t: _Task, seat: str, stage: str, sha: str, schema: dict, what: str, blocked) -> dict:
+        """A checkpoint's stored reply, exactly as the fresh path would have stored it."""
+        reply = self._artifact(t, seat, stage, sha)
+        problems = validate(reply, schema)
+        if problems:
+            raise blocked(f"holds a {what} that does not match its schema: {'; '.join(problems)}")
+        if batch.digest(reply) != sha:
+            raise blocked(f"holds a {what} whose canonical digest is not its sha")
+        if batch.canonical(reply) != batch.canonical(batch.accepted(reply)):
+            raise blocked(f"holds a {what} that is not its accepted value")
+        return reply
+
+    def _verified_proposal(self, t: _Task, proposed: dict, readings: dict, reveals: dict,
+                           inputs: dict) -> tuple[dict, dict]:
+        """The packet and accepted proposal of a batch.proposed checkpoint, verified against today's inputs."""
+        def blocked(problem: str) -> _Stop:
+            return _Stop(Outcome("blocked", t.id, f"the batch.proposed checkpoint {problem}"))
+
+        problem = _checkpoint_problem(proposed, t.builder, "builder")
+        if problem:
+            raise blocked(problem)
+        if proposed.get("opening") != _opening_sha(t):
+            raise blocked("belongs to another opening")
+        pinned = proposed.get("packet")
+        if not isinstance(pinned, dict) or batch.digest(pinned) != proposed["packet_sha"]:
+            raise blocked("has a packet that does not match its packet_sha")
+        if not _precedents_ok(pinned.get("precedents")):
+            raise blocked("has malformed precedents")
+        # The precedents are pinned: a ruling elsewhere since the proposal must not change the question.
+        packet = self._batch_packet(t, pinned["precedents"], readings, reveals, inputs)
+        if set(pinned) != set(packet):
+            raise blocked("has a packet with other fields")
+        for field in packet:                      # canonical JSON: key order is free, 0 is not False
+            if batch.canonical(pinned[field]) != batch.canonical(packet[field]):
+                raise blocked(f"does not match today's {field}")
+        if batch.digest(packet) != proposed["packet_sha"]:
+            raise blocked("has a packet that does not match its packet_sha")
+        if _route(packet) != "batch":
+            raise blocked("is on a direct route")
+        proposal = self._verified_reply(t, t.builder, _PROPOSE, proposed["sha"], schemas.PROPOSAL, "proposal", blocked)
+        problem = batch.proposal_problem(proposal, packet, proposed["packet_sha"])
+        if problem:
+            raise blocked(f"holds a proposal that no longer passes its checks: {problem}")
+        return packet, proposal
+
+    def _review_proposal(self, t: _Task, packet: dict, proposal: dict, proposed: dict) -> dict:
+        packet_sha, proposal_sha = proposed["packet_sha"], proposed["sha"]
+        seat = t.challenger
+        session = self._session_for_call(t, seat)
+        request = SeatRequest(_REVIEW, briefs.review(packet, packet_sha, proposal, proposal_sha), self._clone_of(t, seat),
+                              schemas.REVIEW, writable=False, session=session, out_dir=self._artifact_dir(t, seat, _REVIEW))
+        result, request = self._call(
+            seat, request, task=t,
+            check=lambda raw: batch.review_problem(batch.accepted(raw), proposal, packet, packet_sha, proposal_sha))
+        review = batch.accepted(result.output)
+        sha = self._store(request.out_dir, review)
+        self.journal.append("batch.reviewed", t.id, batch_protocol=_BATCH_PROTOCOL, seat=seat, packet_sha=packet_sha,
+                            proposal_sha=proposal_sha, sha=sha, usage=result.usage)
+        self.say(f"{t.id}: {seat} reviewed the settlement")
+        return review
+
+    def _verified_review(self, t: _Task, reviewed: dict, proposed: dict, packet: dict, proposal: dict) -> dict:
+        def blocked(problem: str) -> _Stop:
+            return _Stop(Outcome("blocked", t.id, f"the batch.reviewed checkpoint {problem}"))
+
+        problem = _checkpoint_problem(reviewed, t.challenger, "challenger")
+        if problem:
+            raise blocked(problem)
+        if reviewed["packet_sha"] != proposed["packet_sha"]:
+            raise blocked("names a different packet")
+        if reviewed.get("proposal_sha") != proposed["sha"]:
+            raise blocked("names a different proposal")
+        review = self._verified_reply(t, t.challenger, _REVIEW, reviewed["sha"], schemas.REVIEW, "review", blocked)
+        problem = batch.review_problem(review, proposal, packet, proposed["packet_sha"], proposed["sha"])
+        if problem:
+            raise blocked(f"holds a review that no longer passes its checks: {problem}")
+        return review
 
     # Step 6
     def _rulings(self, t: _Task) -> None:
