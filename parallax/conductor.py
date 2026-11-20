@@ -69,6 +69,7 @@ class _Task:
     challenger: str
     dir: Path                        # <home>/<repo key>/<task>, private
     whole: bool = False              # task.opened carried interface_protocol="whole"
+    batch: bool = False              # task.opened carried batch_protocol="confirmed-v1" (Task 19.4)
 
     def role(self, seat: str) -> str:
         return "builder" if seat == self.builder else "challenger"
@@ -228,6 +229,42 @@ def _checkpoint_problem(event: dict, seat: str, role: str) -> str | None:
     return None
 
 
+_BATCH_RECORDS = ("batch.proposed", "batch.reviewed", "reading.settled")
+
+
+def _opening_problem(opened: dict) -> str | None:
+    """Why this version cannot read a recorded task.opened, or None. A marker that is absent is an older opening."""
+    if "interface_protocol" in opened and opened["interface_protocol"] != "whole":
+        return f"has interface_protocol {opened['interface_protocol']!r}, which this version of parallax does not know"
+    if "batch_protocol" not in opened:
+        return None
+    if opened["batch_protocol"] != _BATCH_PROTOCOL:
+        return f"has batch_protocol {opened['batch_protocol']!r}, which this version of parallax does not know"
+    if opened.get("interface_protocol") != "whole":
+        return f"has batch_protocol {_BATCH_PROTOCOL} without interface_protocol whole"
+    if opened.get("kind") != "behavior":
+        return f"has batch_protocol {_BATCH_PROTOCOL} on a {opened.get('kind')} task"
+    return None
+
+
+def _batch_mismatch(t: _Task, event: dict) -> str | None:
+    """Why `event` cannot belong to `t` under its batch protocol, or None.
+
+    On a confirmed-v1 task every reveal and batch record carries the marker, and no standalone reading
+    or interface card exists. On any other task no record carries it and no batch record exists.
+    """
+    what = f"{event['seat']}'s {event['type']}" if event.get("seat") else event["type"]
+    if t.batch:
+        if event["type"] == "dispute.opened" and event.get("kind") in ("reading", "interface"):
+            return f"{event['id']} is a standalone {event['kind']} card on a {_BATCH_PROTOCOL} task"
+        if event["type"] in ("reveal.done",) + _BATCH_RECORDS and event.get("batch_protocol") != _BATCH_PROTOCOL:
+            return f"{what} is not marked batch_protocol {_BATCH_PROTOCOL}, but {t.id} was opened {_BATCH_PROTOCOL}"
+        return None
+    if "batch_protocol" in event or event["type"] in _BATCH_RECORDS:
+        return f"{what} is a {_BATCH_PROTOCOL} record, but {t.id} was not opened {_BATCH_PROTOCOL}"
+    return None
+
+
 class Conductor:
     cfg: Config
 
@@ -342,12 +379,14 @@ class Conductor:
                 return Outcome("dropped", task, f"{task} was already dropped")
             if "task.integrated" in ended:
                 return Outcome("landed", task, f"{task} has already landed")
-        t = self._open(task, text, builder)
+        t = self._open(task, text, builder, check_protocol=True)
         if t.kind == "chore":
             return self._solo(t)
-        self._check_protocol(t)
         self._readings(t)
         self._reveal(t)
+        if t.batch:
+            # Task 19.4 records confirmed reveals. Publishing their settlement is Task 19.5's.
+            return Outcome("stopped", t.id, "stopped after the confirmed reveals")
         self._settle(t)
         self._rulings(t)
         self._contract(t)
@@ -395,7 +434,14 @@ class Conductor:
             pass
 
     # Step 2
-    def _open(self, task: str, text: str, builder: str | None) -> _Task:
+    def _open(self, task: str, text: str, builder: str | None, *, batch: bool = False,
+              check_protocol: bool = False) -> _Task:
+        """The task's opening, recorded now if it has none. `batch` marks a new opening confirmed-v1.
+
+        Only tests pass `batch` until Task 19.7. A recorded opening is never changed. An opening this
+        version cannot read blocks before the task's folder, a checkout or another event is created,
+        and so, with `check_protocol` (as `run` passes it), does an event written under another protocol.
+        """
         names = [s.name for s in self.cfg.seats]
         opened = self._first(task, "task.opened")
         if opened is None:
@@ -406,16 +452,25 @@ class Conductor:
             if builder not in names:
                 raise ValueError(f"unknown seat {builder!r}; the seats are {', '.join(names)}")
             challenger = names[1 - names.index(builder)]
+            if batch and kind != "behavior":
+                raise ValueError(f"only a behavior task can be opened {_BATCH_PROTOCOL}")
+            marker = {"batch_protocol": _BATCH_PROTOCOL} if batch else {}
             opened = self.journal.append("task.opened", task, kind=kind, base=gitops.rev(self.cfg.root, self.cfg.main),
                                          builder=builder, challenger=challenger, title=title or task,
-                                         interface_protocol="whole")
+                                         interface_protocol="whole", **marker)
             self.say(f"{task}: opened ({kind}); builder {builder}, challenger {challenger}")
+        problem = _opening_problem(opened)
+        if problem:
+            raise _Stop(Outcome("blocked", task, f"{task}'s task.opened {problem}"))
         t = _Task(task, text, opened["kind"], opened["title"], opened["base"], opened["builder"],
                   opened["challenger"], self.home / repo_key(self.cfg.root) / task,
-                  whole=opened.get("interface_protocol") == "whole")
+                  whole=opened.get("interface_protocol") == "whole",
+                  batch=opened.get("batch_protocol") == _BATCH_PROTOCOL)
         for seat in t.seats:
             if seat not in self.seats:
                 raise ValueError(f"no seat named {seat!r} was given to the conductor")
+        if check_protocol:
+            self._check_protocol(t)                         # both kinds, before any state exists
         if not t.dir.exists():
             folders.make_private(t.dir)
         for seat in (t.seats if t.kind == "behavior" else (t.builder,)):
@@ -425,6 +480,9 @@ class Conductor:
 
     # Step 3
     def _readings(self, t: _Task) -> None:
+        if t.batch:
+            # A reveal recorded before a missing seal can never be settled: block before reading.
+            self._marked_inputs(t, self.events(t.id), pair=False)
         todo = [seat for seat in t.seats if self._sealed(t, seat) is None]
         self._parallel([lambda seat=seat: self._read(t, seat) for seat in todo])
 
@@ -456,9 +514,17 @@ class Conductor:
     # Step 4
     def _reveal(self, t: _Task) -> None:
         todo = [seat for seat in t.seats if self._last(t.id, "reveal.done", seat=seat) is None]
-        self._parallel([lambda seat=seat: self._reveal_one(t, seat) for seat in todo])
+        readings = None
+        if t.batch:
+            # Never spend a reveal's call on a prefix the settlement would refuse, or without its session.
+            readings = self._marked_inputs(t, self.events(t.id), pair=False)[0]
+            for seat in todo:
+                self._session_for_call(t, seat)
+        self._parallel([lambda seat=seat: self._reveal_one(t, seat, readings) for seat in todo])
 
-    def _reveal_one(self, t: _Task, seat: str) -> None:
+    def _reveal_one(self, t: _Task, seat: str, readings: dict | None = None) -> None:
+        """`seat`'s reveal. On a marked task `readings` are both sealed readings by role, and `_reveal` has
+        verified them and the sealed session this call resumes."""
         other_reading = self._reading(t, t.other(seat))
         count = len(other_reading["decisions"])
 
@@ -472,12 +538,21 @@ class Conductor:
             return "\n".join(p for p in problems if p) or None
 
         schema = schemas.REVEAL if t.whole else schemas.REVEAL_AMENDING      # module attributes: tests patch them
-        request = SeatRequest("reveal", briefs.reveal(t.role(seat), other_reading, whole=t.whole),
-                              self._clone_of(t, seat), schema, writable=False,
+        brief = briefs.reveal(t.role(seat), other_reading, whole=t.whole)
+        marker = {}
+        if t.batch:
+            # Confirmed-v1: the checks the settlement makes run here, inside the retry, so the seat can correct them.
+            role = t.role(seat)
+            keys = decisions.source_keys(readings)
+            check = lambda output: _reveal_problem(role, output, readings, keys)   # noqa: E731
+            schema = schemas.REVEAL_CONFIRMED
+            brief = briefs.reveal(role, readings[t.role(t.other(seat))], whole=True, own_reading=readings[role])
+            marker = {"batch_protocol": _BATCH_PROTOCOL}
+        request = SeatRequest("reveal", brief, self._clone_of(t, seat), schema, writable=False,
                               session=self._sealed(t, seat)["session"], out_dir=self._artifact_dir(t, seat, "reveal"))
         result, request = self._call(seat, request, task=t, check=check)
         sha = self._store(request.out_dir, result.output)
-        self.journal.append("reveal.done", t.id, seat=seat, sha=sha, usage=result.usage)
+        self.journal.append("reveal.done", t.id, seat=seat, sha=sha, usage=result.usage, **marker)
         self.say(f"{t.id}: {seat}'s reveal done")
 
     # Step 5
@@ -525,6 +600,15 @@ class Conductor:
         Each seat's effective seal and reveal are its last `reading.sealed` and `reveal.done`. Both seals
         must come before both reveals, so a reveal is never paired with a reading resealed after it.
         """
+        return self._marked_inputs(t, events, pair=True)
+
+    def _marked_inputs(self, t: _Task, events: list[dict], *, pair: bool) -> tuple[dict, dict, dict, int | None]:
+        """`_confirm_inputs` when `pair`; otherwise the same checks on what a marked task has recorded so far.
+
+        Unpaired, a seat may lack its reveal, and may lack its seal while no reveal is recorded, but a
+        recorded reveal needs both effective seals before it. The readings and reveals returned are the
+        ones present, and the index is None while no reveal is recorded.
+        """
         def blocked(detail: str) -> _Stop:
             return _Stop(Outcome("blocked", t.id, detail))
 
@@ -535,32 +619,40 @@ class Conductor:
             elif event.get("seat") in t.seats and event["type"] == "reveal.done":
                 reveals_done[event["seat"]] = (i, event)
         for seat in t.seats:
-            if seat not in seals or seat not in reveals_done:
+            if pair and (seat not in seals or seat not in reveals_done):
                 raise blocked(f"{seat} has no sealed reading and reveal to settle")
-        if max(i for i, _ in seals.values()) > min(i for i, _ in reveals_done.values()):
+            if reveals_done and seat not in seals:
+                raise blocked(f"{seat} has no sealed reading before the recorded reveals")
+        if reveals_done and max(i for i, _ in seals.values()) > min(i for i, _ in reveals_done.values()):
             raise blocked("the recorded reveals do not follow both sealed readings")
         readings, reveals, inputs = {}, {}, {}
         for seat in t.seats:
-            sealed, done = seals[seat][1], reveals_done[seat][1]
-            if not _sha_ok(sealed.get("sha")):
+            sealed = seals[seat][1] if seat in seals else None
+            done = reveals_done[seat][1] if seat in reveals_done else None
+            if sealed is not None and not _sha_ok(sealed.get("sha")):
                 raise blocked(f"{seat}'s reading.sealed has no sha")
-            if not _sha_ok(done.get("sha")):
+            if done is not None and not _sha_ok(done.get("sha")):
                 raise blocked(f"{seat}'s reveal.done has no sha")
-            if done.get("batch_protocol") != _BATCH_PROTOCOL:
+            if done is not None and done.get("batch_protocol") != _BATCH_PROTOCOL:
                 raise blocked(f"{seat}'s reveal.done is not marked batch_protocol {_BATCH_PROTOCOL}")
             role = t.role(seat)
-            readings[role] = self._artifact(t, seat, "reading", sealed["sha"])
-            problems = validate(readings[role], schemas.READING)
-            if problems:
-                raise blocked(f"{seat}'s sealed reading is not a valid reading: {'; '.join(problems)}")
-            reveals[role] = self._artifact(t, seat, "reveal", done["sha"])
-            inputs[role] = {"reading": sealed["sha"], "reveal": done["sha"]}
-        keys = decisions.source_keys(readings)
-        for seat in t.seats:
-            problem = _reveal_problem(t.role(seat), reveals[t.role(seat)], readings, keys)
-            if problem:
-                raise blocked(f"{seat}'s recorded reveal is not a confirmed-v1 reveal: {problem}")
-        return readings, reveals, inputs, max(i for i, _ in reveals_done.values())
+            if sealed is not None:
+                readings[role] = self._artifact(t, seat, "reading", sealed["sha"])
+                problems = validate(readings[role], schemas.READING)
+                if problems:
+                    raise blocked(f"{seat}'s sealed reading is not a valid reading: {'; '.join(problems)}")
+            if done is not None:
+                reveals[role] = self._artifact(t, seat, "reveal", done["sha"])
+                inputs[role] = {"reading": sealed["sha"], "reveal": done["sha"]}
+        if reveals:                                         # then both readings are present
+            keys = decisions.source_keys(readings)
+            for seat in t.seats:
+                if t.role(seat) not in reveals:
+                    continue
+                problem = _reveal_problem(t.role(seat), reveals[t.role(seat)], readings, keys)
+                if problem:
+                    raise blocked(f"{seat}'s recorded reveal is not a confirmed-v1 reveal: {problem}")
+        return readings, reveals, inputs, max((i for i, _ in reveals_done.values()), default=None)
 
     def _artifact(self, t: _Task, seat: str, stage: str, sha: str):
         """`_stored`, with an artifact that is not JSON as a blocked outcome rather than an exception."""
@@ -735,8 +827,14 @@ class Conductor:
         return reveals
 
     def _check_protocol(self, t: _Task) -> None:
-        """Blocks when a recorded interface card or frozen contract was written under the other protocol."""
+        """Blocks on the first recorded event written under another protocol than the task's opening.
+
+        Interface cards and frozen contracts carry the interface protocol; `_batch_mismatch` covers the batch protocol.
+        """
         for e in self.events(t.id):
+            problem = _batch_mismatch(t, e)
+            if problem:
+                raise _Stop(Outcome("blocked", t.id, problem))
             if e["type"] == "dispute.opened" and e.get("kind") == "interface":
                 what = e["id"]
             elif e["type"] == "contract.frozen":
