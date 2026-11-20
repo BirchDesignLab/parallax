@@ -33,3 +33,14 @@ def scrub_paths(text: str) -> str:
         pos = end
     out.append(text[pos:])
     return "".join(out)
+
+
+def scrub_values(value):
+    """`value` with every string in it scrubbed, so JSON is serialized from clean text, never scrubbed after escaping."""
+    if isinstance(value, str):
+        return scrub_paths(value)
+    if isinstance(value, list):
+        return [scrub_values(item) for item in value]
+    if isinstance(value, dict):
+        return {key: scrub_values(item) for key, item in value.items()}
+    return value

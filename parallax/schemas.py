@@ -22,6 +22,23 @@ REVEAL_AMENDING = _obj(interface_ok=_B, interface_objection=_S, verdicts=_VERDIC
 _CONFLICTS = _list(_obj(source=_S, target=_S, reason=_S))
 REVEAL_CONFIRMED = _obj(interface_ok=_B, interface_objection=_S, interface_replacement=_S,
                         verdicts=_VERDICTS, conflicts=_CONFLICTS)   # Task 19, for confirmed-v1 tasks
+_KEYS = _list(_S)
+_VALUE = _obj(interface=_S, policy=_S)
+_TARGET = {"type": "string", "enum": ["policy", "interface", "combined"]}
+_ANSWER = {"type": "string", "enum": ["a", "b"]}
+_ASSENT = _obj(coverage=_B, shared_terms=_B, withdrawals=_B, columns_and_witnesses=_B, all_combinations=_B)
+_VOTES = _list(_obj(slot=_S, sign=_list(_ANSWER), reason=_S))
+PROPOSAL = _obj(
+    packet_sha=_S, decision={"type": "string", "enum": ["propose", "refuse"]},
+    common=_list(_obj(slot=_S, question=_S, text=_S, sources=_KEYS)),
+    choices=_list(_obj(slot=_S, target=_TARGET, question=_S, members=_KEYS, a=_VALUE, b=_VALUE,
+                       witnesses=_list(_obj(source=_S, scenario=_S, observation=_S, a=_S, b=_S)))),
+    withdrawn=_list(_obj(role={"type": "string", "enum": ["builder", "challenger"]}, source=_S,
+                         destinations=_list(_S), reason=_S)),
+    assent=_ASSENT, votes=_VOTES, preferences=_list(_obj(slot=_S, answer=_ANSWER)),
+    fallback=_obj(known=_B, members=_KEYS, question=_S), refusal_reason=_S, affected=_KEYS)
+REVIEW = _obj(packet_sha=_S, proposal_sha=_S, decision={"type": "string", "enum": ["attest", "refuse"]},
+              assent=_ASSENT, votes=_VOTES, fallback_complete=_B, refusal_reason=_S, affected=_KEYS)
 BUILD = _obj(summary=_S, blocked=_S, mutants=_MUTANTS, files=FILES)
 PROBE = _obj(summary=_S, blocked=_S, files=FILES)
 SOLO = PROBE

@@ -15,6 +15,7 @@ import json
 import re
 from typing import Sequence
 
+from parallax import batch, redact
 from parallax.config import Config
 from parallax.decisions import INTERFACE_QUESTION, source_keys
 from parallax.redact import scrub_paths as _scrub
@@ -180,17 +181,6 @@ Reply with JSON that has exactly these fields:
     )
 
 
-def _scrub_values(value):
-    """`value` with every string in it scrubbed, so JSON is serialized from clean text, never scrubbed after escaping."""
-    if isinstance(value, str):
-        return _scrub(value)
-    if isinstance(value, list):
-        return [_scrub_values(item) for item in value]
-    if isinstance(value, dict):
-        return {key: _scrub_values(item) for key, item in value.items()}
-    return value
-
-
 def _join_scrubbed(*parts: str) -> str:
     """Like `_join`, for parts that are already clean: no whole-text scrub, so serialized JSON stays intact."""
     return "\n\n".join(p.strip("\n") for p in parts if p) + "\n"
@@ -278,7 +268,7 @@ Reply with JSON that has exactly these fields:
                  f"order. `builder/interface` identifies the builder's complete interface.")
     return _join_scrubbed(
         _scrub(head),
-        _scrub(f"## The {other}'s reading") + "\n\n" + _block(json.dumps(_scrub_values(other_reading), indent=2), "json"),
+        _scrub(f"## The {other}'s reading") + "\n\n" + _block(json.dumps(redact.scrub_values(other_reading), indent=2), "json"),
         _scrub(key_intro) + "\n\n" + _block(json.dumps(entries, indent=2), "json"),
         _scrub(what_to_return))
 
@@ -429,15 +419,105 @@ Reply with JSON that has exactly these fields:
     )
 
 
+SCRUB_NOTE = ("Absolute paths in your reply are replaced with `<outside>/<file name>` before it is checked and "
+              "recorded, so never rely on one to tell two answers apart.")
+PROPOSE_INTRO = (
+    "Do not change any file in this step. Both readings are sealed and both reveals are in. Together they leave "
+    "more than one point in dispute, or a seat flagged a conflict, so no card goes to the human yet. You propose "
+    "how the contract settles. Then the challenger checks your proposal word for word, in its own session, and "
+    "either attests it or refuses it. " + SCRUB_NOTE)
+PROPOSE_GUIDE = """## What to propose
+
+- **Trace every source** in the packet's `sources`, including every guarantee inside a disputed answer, to the exact common text or choice values that carry it. Each key goes into at least one common term (`common`) or choice (`choices`). A disputed source can settle entirely into common text that both seats can sign, or keep a residual common promise and also feed a choice. Treat citations (`decided_by`) as leads, not as groupings. Use packet keys exactly as written, each at most once in any one list.
+- **`common`** holds the terms both seats can sign as written: the complete interface under slot `interface` (unless the interface is itself a choice), and each decision under slots `p/0`, `p/1`, ... in order. Each term has a question, its text, and at least one source key in `sources`.
+- **`choices`** holds what is still open, one entry per independent choice, under slots `c/0`, `c/1`, ... in order. `target` is `policy` for a decision, `interface` for the complete interface, or `combined` when the interface and a decision cannot be chosen separately. Each choice has a root question and at least one member key. Column `a` is the builder's position and column `b` the challenger's. Fill `policy` for a policy choice, `interface` for an interface choice, and both for a combined one; put exactly the empty string in each unused field. Give at least one witness per choice: a concrete scenario and observation where `a` and `b` commit to different results, with a member key as its `source`. A structural witness may use an import or a call. Make separate choices only if every combination of their answers is a valid contract.
+- **Exactly one producer gives the interface**: the common `interface` term, or one `interface` or `combined` choice. `builder/interface` is among its sources.
+- **Withdrawals.** If an agreed source moves into a choice, it loses its standing as an unconditional promise. Give each role whose endorsement changes its own `withdrawn` entry: the `role`, the `source`, every choice slot it moves to (`destinations`, in choice order) and a `reason`.
+- **`assent`.** Set all five to true when you vouch for the whole proposal: `coverage` (every source and every guarantee inside it is carried), `shared_terms` (the common terms say what both seats promised), `withdrawals` (every withdrawn endorsement is listed), `columns_and_witnesses` (each column states its side and each witness predicts what each column commits to), `all_combinations` (every combination of separate choices is a valid contract).
+- **`votes` and `preferences`.** One vote per choice: `sign` lists each answer you can sign (`a`, `b` or both) once, with a reason. One preference per choice: the answer you prefer among those you sign. An answer both seats can sign settles without the human. When both seats can sign both, your preference decides. When you hold `a` and the challenger holds `b`, the choice goes to the human as one card.
+- **`fallback`**, in case the challenger refuses your proposal. A known fallback names whole source keys, and a root question that asks the human for the entire replacement of those sources. Include every source that is disputed, flagged in a conflict, withdrawn, or otherwise affected. Everything you leave out must be an agreed term that survives word for word. If you cannot say, set `known` to false, with no members and an empty question.
+- **Refusing.** Refuse if any choice has no answer you can sign, if you cannot propose terms the challenger could check, or if you cannot vouch for the claims above. Set `decision` to `refuse` and give `refusal_reason`. Leave `common`, `choices`, `withdrawn`, `votes` and `preferences` empty, and set every `assent` flag to false. Name every `affected` key you can identify; with a known fallback, name at least one. With an unknown fallback you may still name the affected keys you can identify, or leave `affected` empty if you can identify none."""
+PROPOSE_FIELDS = """## What to return
+
+Reply with JSON that has exactly these fields:
+
+- `packet_sha` (string): `{packet_sha}`, copied exactly.
+- `decision` (string): `propose` or `refuse`.
+- `common` (list): each entry with `slot`, `question`, `text` and `sources` (a list of keys).
+- `choices` (list): each entry with `slot`, `target`, `question`, `members` (a list of keys), `a` and `b` (each an object with `interface` and `policy`) and `witnesses` (a list, each with `source`, `scenario`, `observation`, `a` and `b`).
+- `withdrawn` (list): each entry with `role`, `source`, `destinations` (a list of choice slots) and `reason`.
+- `assent` (object): `coverage`, `shared_terms`, `withdrawals`, `columns_and_witnesses` and `all_combinations`, each a boolean.
+- `votes` (list): each entry with `slot`, `sign` (a list of `a` and `b`) and `reason`.
+- `preferences` (list): each entry with `slot` and `answer` (`a` or `b`).
+- `fallback` (object): `known` (boolean), `members` (a list of keys) and `question` (string).
+- `refusal_reason` (string): empty when you propose.
+- `affected` (list of keys): empty when you propose."""
+REVIEW_INTRO = (
+    "Do not change any file in this step. Both readings are sealed and both reveals are in. The builder has "
+    "proposed how the contract settles, from the packet below. Check the proposal word for word, then attest it "
+    "or refuse it. No card goes to the human until you answer. " + SCRUB_NOTE)
+REVIEW_GUIDE = """## How to review
+
+- **Trace every source** in the packet, including every guarantee inside a disputed answer, to the exact common text or choice values that carry it. Check whose endorsement each withdrawal changes and every destination it names, each standing promise in `common`, both columns against their witnesses, and every combination of separate choices.
+- **Attest** only if you can vouch for the proposal exactly as written. Set `decision` to `attest` and all five `assent` flags to true: `coverage` (every source and every guarantee inside it is carried), `shared_terms` (the common terms say what both seats promised), `withdrawals` (every withdrawn endorsement is listed), `columns_and_witnesses` (each column states its side and each witness predicts what each column commits to), `all_combinations` (every combination of separate choices is a valid contract). Give one vote per choice: `sign` lists each answer you can sign (`a`, `b` or both) once, with a reason. An answer both seats can sign settles without the human. When you hold `b` and the builder holds `a`, the choice goes to the human as one card. Never hold `a` against the builder's `b`: that reverses the columns, so refuse instead. When you attest, `refusal_reason` is empty and `affected` is an empty list.
+- **Refuse** if any word must change, if you can sign neither answer of a choice, or if you cannot vouch for the claims above. Set `decision` to `refuse`, say why in `refusal_reason`, leave `votes` empty and set every `assent` flag to false. Name every `affected` key you can identify; you may leave `affected` empty only when `fallback_complete` is false. A refused proposal can only be refused, even when you confirm its fallback.
+- **`fallback_complete`**, independently of your decision. Start from every whole packet term outside the fallback's members. Set it true only if the builder's fallback is known, its question asks the human for the entire replacement, and every term outside it can survive word for word. Check disputed sources, both ends of each conflict, withdrawn sources and any collateral promise. Report an omitted term honestly.
+- **Assess the proposal and the fallback separately.** If the proposal is sound and only the fallback is incomplete, attest with `fallback_complete` false and `affected` empty: the proposal settles and the fallback is never used. If you refuse, name the affected sources; an incomplete fallback then makes the conductor block rather than ask the human for an incomplete replacement."""
+REVIEW_FIELDS = """## What to return
+
+Reply with JSON that has exactly these fields:
+
+- `packet_sha` (string): `{packet_sha}`, copied exactly.
+- `proposal_sha` (string): `{proposal_sha}`, copied exactly.
+- `decision` (string): `attest` or `refuse`.
+- `assent` (object): `coverage`, `shared_terms`, `withdrawals`, `columns_and_witnesses` and `all_combinations`, each a boolean.
+- `votes` (list): each entry with `slot`, `sign` (a list of `a` and `b`) and `reason`.
+- `fallback_complete` (boolean).
+- `refusal_reason` (string): empty when you attest.
+- `affected` (list of keys): empty when you attest."""
+
+
+def _json_part(heading: str, value: dict) -> str:
+    # The block is batch.canonical of the accepted value, so the digest printed above it is the digest of the
+    # parsed block, and a value reloaded from a stored artifact renders the same bytes.
+    clean = redact.scrub_values(value)
+    return (_scrub(heading) + f"\n\nIts digest is `{batch.digest(clean)}`.\n\n" + _block(batch.canonical(clean), "json"))
+
+
+def propose(packet: dict, packet_sha: str) -> str:
+    if batch.digest(redact.scrub_values(packet)) != packet_sha:
+        raise ValueError("packet_sha is not the digest of the packet")
+    return _join_scrubbed(
+        _scrub(f"# Confirm: builder\n\n{RULES}\n\n{PROPOSE_INTRO}"),
+        _json_part("## The packet", packet),
+        _scrub(PROPOSE_GUIDE),
+        _scrub(PROPOSE_FIELDS.format(packet_sha=packet_sha)))
+
+
+def review(packet: dict, packet_sha: str, proposal: dict, proposal_sha: str) -> str:
+    if batch.digest(redact.scrub_values(packet)) != packet_sha:
+        raise ValueError("packet_sha is not the digest of the packet")
+    if batch.digest(redact.scrub_values(proposal)) != proposal_sha:
+        raise ValueError("proposal_sha is not the digest of the proposal")
+    return _join_scrubbed(
+        _scrub(f"# Confirm: challenger\n\n{RULES}\n\n{REVIEW_INTRO}"),
+        _json_part("## The packet", packet),
+        _json_part("## The builder's proposal", proposal),
+        _scrub(REVIEW_GUIDE),
+        _scrub(REVIEW_FIELDS.format(packet_sha=packet_sha, proposal_sha=proposal_sha)))
+
+
 def rejected(brief: str, reason: str) -> str:
-    """`brief` followed by why the conductor rejected the last reply."""
-    return _join(brief, f"""## Your last reply was rejected
+    """`brief`, kept whole byte for byte, followed by why the conductor rejected the last reply."""
+    suffix = f"""## Your last reply was rejected
 
 The conductor rejected your last reply for this reason:
 
-{_block(reason)}
+{_block(_scrub(reason))}
 
-Fix exactly that and reply again, with JSON in the same format as asked above.""")
+Fix exactly that and reply again, with JSON in the same format as asked above."""
+    separator = "\n" if brief.endswith("\n") else "\n\n"
+    return brief + separator + suffix + "\n"
 
 
 def retry(reason: str) -> str:
