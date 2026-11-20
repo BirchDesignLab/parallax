@@ -1,5 +1,5 @@
 import unittest
-from parallax.schemas import BUILD, READING, RESPOND, REVEAL, REVEAL_AMENDING, WITNESS, validate
+from parallax.schemas import BUILD, READING, RESPOND, REVEAL, REVEAL_AMENDING, REVEAL_CONFIRMED, WITNESS, validate
 
 GOOD = {"interface": "f(x)", "decisions": [{"question": "q", "answer": "a", "why": "w"}], "predicted_failures": []}
 
@@ -60,3 +60,35 @@ class Validate(unittest.TestCase):
         self.assertTrue(any("interface_replacement" in p and "string" in p for p in problems), problems)
         self.assertEqual(validate(prior, REVEAL_AMENDING), [])
         self.assertIn("$: unexpected property 'interface_replacement'", validate(current, REVEAL_AMENDING))
+
+    def test_the_confirmed_reveal_adds_a_conflicts_list_and_the_others_are_unchanged(self):
+        empty = {"scenario": "", "observation": "", "theirs": "", "mine": "", "decided_by": ""}
+        current = {"interface_ok": True, "interface_objection": "", "interface_replacement": "",
+                   "verdicts": [{"index": 0, "agree": True, "counter": "", "why": "", "witness": empty}]}
+        good = {"source": "challenger/0", "target": "builder/0", "reason": "r"}
+        flagged = {**current, "conflicts": [good]}
+        self.assertEqual(validate(flagged, REVEAL_CONFIRMED), [])
+        self.assertEqual(validate({**current, "conflicts": []}, REVEAL_CONFIRMED), [])
+        self.assertEqual(validate(current, REVEAL_CONFIRMED), ["$: missing 'conflicts'"])
+        for field in ("source", "target", "reason"):
+            with self.subTest(field=field):
+                missing = {k: v for k, v in good.items() if k != field}
+                self.assertEqual(validate({**current, "conflicts": [missing]}, REVEAL_CONFIRMED),
+                                 [f"$.conflicts[0]: missing '{field}'"])
+                self.assertEqual(validate({**current, "conflicts": [{**good, field: 5}]}, REVEAL_CONFIRMED),
+                                 [f"$.conflicts[0].{field}: expected string"])
+        self.assertEqual(validate({**current, "conflicts": [{**good, "x": 1}]}, REVEAL_CONFIRMED),
+                         ["$.conflicts[0]: unexpected property 'x'"])
+        self.assertEqual(validate({**current, "conflicts": {}}, REVEAL_CONFIRMED), ["$.conflicts: expected array"])
+        self.assertEqual(validate({**current, "conflicts": ["x"]}, REVEAL_CONFIRMED), ["$.conflicts[0]: expected object"])
+        self.assertIn("$: unexpected property 'conflicts'", validate(flagged, REVEAL))
+        # The confirmed shape is REVEAL plus one closed, required field.
+        self.assertEqual(list(REVEAL_CONFIRMED["properties"]),
+                         ["interface_ok", "interface_objection", "interface_replacement", "verdicts", "conflicts"])
+        self.assertEqual(REVEAL_CONFIRMED["required"], list(REVEAL_CONFIRMED["properties"]))
+        self.assertIs(REVEAL_CONFIRMED["additionalProperties"], False)
+        for name, schema in REVEAL["properties"].items():
+            self.assertEqual(REVEAL_CONFIRMED["properties"][name], schema, name)
+        self.assertEqual(list(REVEAL["properties"]),
+                         ["interface_ok", "interface_objection", "interface_replacement", "verdicts"])
+        self.assertEqual(list(REVEAL_AMENDING["properties"]), ["interface_ok", "interface_objection", "verdicts"])

@@ -114,6 +114,28 @@ def _evidence(owner: str, reviewer: str, builder: str, challenger: str, decision
     return "\n".join(lines)
 
 
+def _by_index(owner: str, reviewer: str, decisions: object, verdicts: object) -> dict[int, dict]:
+    """The reviewer's verdicts keyed by decision index, with every check and message settle always had."""
+    if not isinstance(decisions, list) or not isinstance(verdicts, list):
+        raise ValueError("decisions and verdicts must be lists")
+    by_index = {}
+    for verdict in verdicts:
+        if not isinstance(verdict, dict):
+            raise ValueError(f"{reviewer} verdict must be an object")
+        index = verdict.get("index")
+        if type(index) is not int or not 0 <= index < len(decisions):
+            raise ValueError(f"{reviewer} gave an invalid verdict index")
+        if index in by_index:
+            raise ValueError(f"{reviewer} gave duplicate verdicts on {owner} decision {index}")
+        if type(verdict.get("agree")) is not bool:
+            raise ValueError(f"{reviewer} verdict agree must be a boolean")
+        by_index[index] = verdict
+    for index in range(len(decisions)):
+        if index not in by_index:
+            raise ValueError(f"{reviewer} gave no verdict on {owner} decision {index}")
+    return by_index
+
+
 def settle(task: str, builder: str, challenger: str, readings: dict[str, dict],
            reveals: dict[str, dict], start: int = 1) -> tuple[str, list[Point], list[Dispute]]:
     _task(task)
@@ -126,24 +148,8 @@ def settle(task: str, builder: str, challenger: str, readings: dict[str, dict],
     interface = _text(readings[builder]["interface"], "interface")
     for owner, reviewer in ((builder, challenger), (challenger, builder)):
         decisions = readings[owner]["decisions"]
-        verdicts = reveals[reviewer]["verdicts"]
-        if not isinstance(decisions, list) or not isinstance(verdicts, list):
-            raise ValueError("decisions and verdicts must be lists")
-        by_index = {}
-        for verdict in verdicts:
-            if not isinstance(verdict, dict):
-                raise ValueError(f"{reviewer} verdict must be an object")
-            index = verdict.get("index")
-            if type(index) is not int or not 0 <= index < len(decisions):
-                raise ValueError(f"{reviewer} gave an invalid verdict index")
-            if index in by_index:
-                raise ValueError(f"{reviewer} gave duplicate verdicts on {owner} decision {index}")
-            if type(verdict.get("agree")) is not bool:
-                raise ValueError(f"{reviewer} verdict agree must be a boolean")
-            by_index[index] = verdict
+        by_index = _by_index(owner, reviewer, decisions, reveals[reviewer]["verdicts"])
         for index, decision in enumerate(decisions):
-            if index not in by_index:
-                raise ValueError(f"{reviewer} gave no verdict on {owner} decision {index}")
             question = _text(decision["question"], "question")
             answer = _text(decision["answer"], "answer")
             verdict = by_index[index]
@@ -253,3 +259,95 @@ def render_card(dispute: Dispute) -> str:
         lines.extend(["", "Evidence:", dispute.evidence])
     lines.extend(["", f"parallax rule {dispute.id} a"])
     return _rendered("\n".join(lines) + "\n")
+
+
+_ROLES = ("builder", "challenger")
+INTERFACE_QUESTION = "What interface should the contract use?"
+
+
+def source_keys(readings: dict[str, dict]) -> list[str]:
+    """Stable keys: builder/0.., challenger/0.., then builder/interface. Never question text."""
+    return [f"{role}/{i}" for role in _ROLES for i in range(len(readings[role]["decisions"]))] + ["builder/interface"]
+
+
+def _display_witness(author: str, owner: str, original: dict) -> dict:
+    def field(name: str) -> str:
+        value = original.get(name, "")
+        return value.strip() if isinstance(value, str) else ""
+
+    theirs, mine = field("theirs"), field("mine")
+    a, b = (theirs, mine) if owner == "builder" else (mine, theirs)
+    return {"author": author, "scenario": field("scenario"), "observation": field("observation"),
+            "a": a, "b": b, "decided_by": field("decided_by")}
+
+
+def sources(readings: dict[str, dict], reveals: dict[str, dict]) -> list[dict]:
+    """One row per source key, in source_keys order. Pure: the sealed inputs are never modified."""
+    if set(readings) != set(_ROLES) or set(reveals) != set(_ROLES):
+        raise ValueError("readings and reveals must be keyed by builder and challenger")
+    for field in ("conflicts", "interface_replacement"):
+        for role in _ROLES:
+            if field not in reveals[role]:
+                raise ValueError(f"{role} reveal is not a confirmed-v1 reveal: missing {field}")
+    by_owner = {}
+    for owner, reviewer in (("builder", "challenger"), ("challenger", "builder")):
+        by_owner[owner] = _by_index(owner, reviewer, readings[owner]["decisions"], reveals[reviewer]["verdicts"])
+    challenger = reveals["challenger"]
+    if type(challenger.get("interface_ok")) is not bool:
+        raise ValueError("interface_ok must be a boolean")
+    rows = []
+    for owner, reviewer in (("builder", "challenger"), ("challenger", "builder")):
+        for index, decision in enumerate(readings[owner]["decisions"]):
+            verdict = by_owner[owner][index]
+            supplied = verdict.get("witness")
+            original = dict(supplied) if isinstance(supplied, dict) else {}
+            agree = verdict["agree"]
+            scenario = original.get("scenario")
+            shown = (not agree and isinstance(scenario, str) and scenario.strip() != "")
+            rows.append({"key": f"{owner}/{index}", "kind": "reading", "owner": owner,
+                         "question": decision["question"], "answer": decision["answer"], "why": decision["why"],
+                         "agree": agree,
+                         "counter": "" if agree else verdict["counter"],
+                         "counter_why": "" if agree else verdict["why"],
+                         "witness": _display_witness(reviewer, owner, original) if shown else {},
+                         "original_witness": original})
+    agree = challenger["interface_ok"]
+    rows.append({"key": "builder/interface", "kind": "interface", "owner": "builder",
+                 "question": INTERFACE_QUESTION, "answer": readings["builder"]["interface"], "why": "",
+                 "agree": agree,
+                 "counter": "" if agree else challenger["interface_replacement"].strip(),
+                 "counter_why": "" if agree else challenger["interface_objection"].strip(),
+                 "witness": {}, "original_witness": {}})
+    return rows
+
+
+def conflict_problem(reveal: dict, keys: Sequence[str]) -> str | None:
+    """Every problem in reveal["conflicts"], one line each in entry order, or None."""
+    known = set(keys)
+    lines = []
+    first: dict[tuple[str, str], int] = {}
+    for i, entry in enumerate(reveal["conflicts"]):
+        source, target = entry["source"], entry["target"]
+        source_ok, target_ok = source in known, target in known
+        if not source_ok:
+            lines.append(f"conflict {i}: unknown source {source or '(blank)'}")
+        if not target_ok:
+            lines.append(f"conflict {i}: unknown target {target or '(blank)'}")
+        if source_ok and target_ok and source == target:
+            lines.append(f"conflict {i}: source and target are both {source}")
+        if not entry["reason"].strip():
+            lines.append(f"conflict {i}: reason must say why the two cannot both stand")
+        if source_ok and target_ok and source != target:
+            if (source, target) in first:
+                lines.append(f"conflict {i}: repeats conflict {first[(source, target)]} ({source} -> {target})")
+            else:
+                first[(source, target)] = i
+    return "\n".join(lines) or None
+
+
+def route(rows: Sequence[dict], reveals: dict[str, dict]) -> str:
+    """Batch when either seat flags a conflict or the disputes interact; otherwise direct."""
+    disputed = sum(1 for row in rows if row["kind"] == "reading" and not row["agree"])
+    interface = sum(1 for row in rows if row["kind"] == "interface" and not row["agree"])
+    flagged = any(reveals[role]["conflicts"] for role in ("builder", "challenger"))
+    return "batch" if flagged or (disputed >= 1 and disputed + interface >= 2) else "direct"

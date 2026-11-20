@@ -16,6 +16,7 @@ import re
 from typing import Sequence
 
 from parallax.config import Config
+from parallax.decisions import INTERFACE_QUESTION, source_keys
 from parallax.redact import scrub_paths as _scrub
 
 RULES = ("Work only in this folder. Do not look outside it. Do not run git. You cannot run the project's "
@@ -35,6 +36,28 @@ FILES_FIELD = (f"- `files` (list): every file you have changed since this task b
                f"changes from your earlier attempts that you kept. Leave out anything you reverted, and leave out "
                f"`{MUTANTS_DIR}/` and `{SCRATCH_DIR}/`. The conductor compares this list with your actual changes and "
                f"rejects your work if they differ.")
+
+
+# The reveal's sentences that confirmed-v1 rewords or adds to (Task 19.1).
+WITNESS_END = "When you agree, all five are empty strings."
+OPEN_PLAIN = ("Points you both accept are settled. Points you hold against each other go to the human, who sees the "
+              "witness, both answers and both reasons.")
+OPEN_CONFIRMED = ("On the direct path, accepted points stand and the human rules on the single remaining objection, "
+                  "if any. In a batch, both seats review the accepted terms and objections together and identify any "
+                  "endorsement that would have to change.")
+CLOSE_PLAIN = ("Never agree to an answer you believe is contradicted: agreement puts that answer into the contract "
+               "as written.")
+CLOSE_CONFIRMED = ("Never agree to an answer you believe is contradicted: agreement can put that answer into the "
+                   "contract as written. Give your verdict and flag the provisions that conflict.")
+CONFLICTS_FIELD = (
+    "- `conflicts` (list): pairs of provisions that you believe cannot both stand as written. Each entry has "
+    "`source` and `target`, two different keys from the table above, and `reason`, one sentence saying what in "
+    "the source would contradict or change the target. Use as `target` a provision you believe should stand, or "
+    "`builder/interface` when the source would change the interface; the target may turn out to be disputed by "
+    "the other seat. Give one entry per source and target pair. Flag a conflict even when you accept the source. "
+    "A flag does not replace a verdict: still give every verdict as asked. Both seats review the provisions "
+    "together if either seat flags a conflict, if two or more reading decisions are disputed, or if a reading "
+    "decision and the builder's interface are both disputed. Return an empty list when you see no conflict.")
 
 
 def _block(text: str, lang: str = "") -> str:
@@ -157,8 +180,28 @@ Reply with JSON that has exactly these fields:
     )
 
 
-def reveal(own_role: str, other_reading: dict, whole: bool = True) -> str:
-    """Step 3. The only brief that shows the other seat's reading, and only after both are sealed."""
+def _scrub_values(value):
+    """`value` with every string in it scrubbed, so JSON is serialized from clean text, never scrubbed after escaping."""
+    if isinstance(value, str):
+        return _scrub(value)
+    if isinstance(value, list):
+        return [_scrub_values(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _scrub_values(item) for key, item in value.items()}
+    return value
+
+
+def _join_scrubbed(*parts: str) -> str:
+    """Like `_join`, for parts that are already clean: no whole-text scrub, so serialized JSON stays intact."""
+    return "\n\n".join(p.strip("\n") for p in parts if p) + "\n"
+
+
+def reveal(own_role: str, other_reading: dict, whole: bool = True, own_reading: dict | None = None) -> str:
+    """Step 3. The only brief that shows the other seat's reading, and only after both are sealed.
+
+    `own_reading` (confirmed-v1 only, needs whole=True) adds the provision keys and the `conflicts` field."""
+    if own_reading is not None and not whole:
+        raise ValueError("own_reading needs whole=True")
     own_role = _role(own_role)
     other = _other(own_role)
     decisions = other_reading.get("decisions") or []
@@ -197,14 +240,12 @@ def reveal(own_role: str, other_reading: dict, whole: bool = True) -> str:
     else:
         interface = ("You are the builder, so your own interface stands. Set `interface_ok` to true and "
                      "`interface_objection` to an empty string.")
-    return _join(
-        f"""# Reveal: {own_role}
+    head = f"""# Reveal: {own_role}
 
 {RULES}
 
-Do not change any file in this step. Your reading is sealed. Below is the {other}'s reading of the same task, written separately from yours. Go through it point by point.""",
-        f"## The {other}'s reading\n\n" + _block(json.dumps(other_reading, indent=2), "json"),
-        f"""## What to return
+Do not change any file in this step. Your reading is sealed. Below is the {other}'s reading of the same task, written separately from yours. Go through it point by point."""
+    what_to_return = f"""## What to return
 
 Reply with JSON that has exactly these fields:
 
@@ -216,8 +257,30 @@ Reply with JSON that has exactly these fields:
   - `why` (string): your reason when you disagree; may be empty when you agree.
   - `witness` (object): when you disagree, one concrete scenario and what each answer commits to on the same observation. `scenario` is the setup and actions, as concrete as a test: literal inputs, and a sequence of steps when one call cannot show it. `observation` is what to inspect (a returned value and its type, an exception type, output, a file, state). `theirs` is what the {other}'s answer commits to there, or exactly `no commitment` when it leaves that observation open. `mine` is what your counter commits to there. `decided_by` is empty, or the question of another decision, copied verbatim from either reading, that supports your objection. When you agree, all five are empty strings.
 
-Points you both accept are settled. Points you hold against each other go to the human, who sees the witness, both answers and both reasons. Agree when you accept the {other}'s whole answer as written, including when you have no competing requirement and can grant that answer. Differences in wording, emphasis or justification alone are agreement. For a disagreement, give one concrete scenario and say what each answer commits to on the same observation. If their answer leaves that observation open and you require an outcome, put exactly `no commitment` in `theirs`, state your requirement in `counter` and its observable result in `mine`. If another decision supports your objection, copy its question verbatim from either reading into `decided_by` and keep this verdict in disagreement. Never agree to an answer you believe is contradicted: agreement puts that answer into the contract as written.""",
-    )
+{OPEN_PLAIN} Agree when you accept the {other}'s whole answer as written, including when you have no competing requirement and can grant that answer. Differences in wording, emphasis or justification alone are agreement. For a disagreement, give one concrete scenario and say what each answer commits to on the same observation. If their answer leaves that observation open and you require an outcome, put exactly `no commitment` in `theirs`, state your requirement in `counter` and its observable result in `mine`. If another decision supports your objection, copy its question verbatim from either reading into `decided_by` and keep this verdict in disagreement. {CLOSE_PLAIN}"""
+    if own_reading is None:
+        return _join(head, f"## The {other}'s reading\n\n" + _block(json.dumps(other_reading, indent=2), "json"),
+                     what_to_return)
+    # Confirmed-v1: the same brief with four changes. Both JSON blocks are built from scrubbed values and
+    # skip the whole-text scrub, which would run on JSON-escaped text.
+    for part in (WITNESS_END, OPEN_PLAIN, CLOSE_PLAIN):
+        assert what_to_return.count(part) == 1, part
+    what_to_return = (what_to_return.replace(WITNESS_END, WITNESS_END + "\n" + CONFLICTS_FIELD)
+                      .replace(OPEN_PLAIN, OPEN_CONFIRMED).replace(CLOSE_PLAIN, CLOSE_CONFIRMED))
+    readings = ({"builder": own_reading, "challenger": other_reading} if own_role == "builder"
+                else {"builder": other_reading, "challenger": own_reading})
+    questions = [d["question"] for role in ROLES for d in readings[role]["decisions"]] + [INTERFACE_QUESTION]
+    entries = [{"key": key, "question": _scrub(question)}
+               for key, question in zip(source_keys(readings), questions)]
+    key_intro = (f"## Provision keys\n\nEach provision in the two readings has a key. Use these keys, exactly as "
+                 f"written, in `conflicts`. Two provisions with the same question still have different keys. You are "
+                 f"the {own_role}. Numbered keys starting with `{own_role}/` identify your sealed decisions in reading "
+                 f"order. `builder/interface` identifies the builder's complete interface.")
+    return _join_scrubbed(
+        _scrub(head),
+        _scrub(f"## The {other}'s reading") + "\n\n" + _block(json.dumps(_scrub_values(other_reading), indent=2), "json"),
+        _scrub(key_intro) + "\n\n" + _block(json.dumps(entries, indent=2), "json"),
+        _scrub(what_to_return))
 
 
 def build(contract: str, cfg: Config) -> str:

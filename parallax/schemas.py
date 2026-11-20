@@ -19,6 +19,9 @@ WITNESS = _obj(scenario=_S, observation=_S, theirs=_S, mine=_S, decided_by=_S)
 _VERDICTS = _list(_obj(index=_I, agree=_B, counter=_S, why=_S, witness=WITNESS))
 REVEAL = _obj(interface_ok=_B, interface_objection=_S, interface_replacement=_S, verdicts=_VERDICTS)
 REVEAL_AMENDING = _obj(interface_ok=_B, interface_objection=_S, verdicts=_VERDICTS)   # Task 17's REVEAL, for unmarked tasks
+_CONFLICTS = _list(_obj(source=_S, target=_S, reason=_S))
+REVEAL_CONFIRMED = _obj(interface_ok=_B, interface_objection=_S, interface_replacement=_S,
+                        verdicts=_VERDICTS, conflicts=_CONFLICTS)   # Task 19, for confirmed-v1 tasks
 BUILD = _obj(summary=_S, blocked=_S, mutants=_MUTANTS, files=FILES)
 PROBE = _obj(summary=_S, blocked=_S, files=FILES)
 SOLO = PROBE
