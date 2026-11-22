@@ -131,7 +131,7 @@ drop) Drop this task.
 parallax rule D-clamp-001-1 other --note TEXT
 """
 NEEDS_ONE = ("needs_ruling", "needs a ruling on D-clamp-001-1")
-SETTLED = ("stopped", "stopped after the confirmed settlement")
+FROZEN = ("stopped", "stopped after the contract was frozen")
 # Both choices of Task 19.3's two-choice batch held apart: two pending cards, a policy and an interface.
 TWO_PENDING = changed(TWO_CHOICES, votes=[{"slot": "c/0", "sign": ["a"], "reason": "strict comparisons"},
                                           {"slot": "c/1", "sign": ["a"], "reason": "one name is enough"}],
@@ -860,31 +860,35 @@ class Pending(unittest.TestCase):
                          [("c/0", "mutual", "", [], True), ("c/1", "pending", "D-clamp-001-1", ["a", "b", "other"], False)])
         self.assertEqual(sorted(p.name for p in card_path(root, "x").parent.iterdir()), ["D-clamp-001-1.md"])
 
-    def test_with_nothing_pending_a_marked_run_stops_after_the_settlement(self):
+    def test_with_nothing_pending_a_marked_run_freezes_its_contract(self):
+        # Task 19.7: past the settlement a marked run freezes its contract, once, with no further call.
         root, c, t, codex, claude = marked(propose=proposes(MUTUAL), review=reviews(MUTUAL_REVIEW))
-        outcome = run(c, root)
-        self.assertEqual((told(outcome), outcome.cards), (SETTLED, ()))
+        outcome = c.run(root / TASK_FILE, stop_after="contract")
+        self.assertEqual((told(outcome), outcome.cards), (FROZEN, ()))
         [settled] = settlements(c)
         self.assertEqual([(row["resolution"], row["selected"], row["id"]) for row in settled["choices"]],
                          [("mutual", "a", "")])
         c2, codex2, claude2 = resumed(root, c)
         before = evidence(c2, t)
-        self.assertEqual(told(run(c2, root)), SETTLED)
+        self.assertEqual(told(c2.run(root / TASK_FILE, stop_after="contract")), FROZEN)
         self.assertEqual((codex2.calls, claude2.calls, evidence(c2, t)), ([], [], before))
-        self.assertNotIn("contract.frozen", [e["type"] for e in c2.events(TASK)])
+        self.assertEqual([e["type"] for e in c2.events(TASK)].count("contract.frozen"), 1)
         self.assertEqual(c2.status(), [{"task": TASK, "status": "in_progress", "pending": []}])
 
-    def test_with_every_card_ruled_a_marked_run_stops_after_the_settlement(self):
+    def test_with_every_card_ruled_a_marked_run_freezes_its_contract(self):
         root, c, t, settled = two_cards(self)
         for row in settled["choices"]:
             c.journal.append("ruling.made", TASK, **ruling(settled, row))
         c2, codex, claude = resumed(root, c)
         journal = c2.journal.path.read_bytes()
-        outcome = run(c2, root)
-        self.assertEqual((told(outcome), outcome.cards), (SETTLED, ()))
+        outcome = c2.run(root / TASK_FILE, stop_after="contract")
+        self.assertEqual((told(outcome), outcome.cards), (FROZEN, ()))
         self.assertEqual(c2.status(), [{"task": TASK, "status": "in_progress", "pending": []}])
-        self.assertEqual((codex.calls, claude.calls, c2.journal.path.read_bytes()), ([], [], journal))
-        self.assertNotIn("contract.frozen", [e["type"] for e in c2.events(TASK)])
+        self.assertEqual((codex.calls, claude.calls), ([], []))
+        # The journal as it was, then exactly one appended event: the freeze.
+        after = c2.journal.path.read_bytes()
+        self.assertEqual(after[:len(journal)], journal)
+        self.assertEqual([e["type"] for e in parse_lines(after[len(journal):].decode("utf-8"))], ["contract.frozen"])
 
     def test_a_standalone_card_on_a_marked_task_blocks_status_and_the_legacy_rule(self):
         root, c, t, codex, claude = marked()

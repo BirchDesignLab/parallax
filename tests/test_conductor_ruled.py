@@ -5,15 +5,19 @@ from tests.test_batch import ALIAS_FALLBACK
 from tests.test_cli import call
 from tests.test_conductor_batch import proposes, reviews
 from tests.test_conductor_reading import resumed
-from tests.test_conductor_settled import (ALIAS_REFUSE, INDENTED_READINGS, NEEDS_ONE, TASK, marked, run, settlements,
-                                          told, two_cards)
+from tests.test_conductor_settled import (ALIAS_REFUSE, INDENTED_READINGS, NEEDS_ONE, TASK, TASK_FILE, marked, run,
+                                          settlements, told, two_cards)
 
 # Task 19.6. A confirmed-v1 settlement's public rows are ruled through the seat-free `rule`: the task is the
 # one whose reading.settled holds the ID, checked as run checks it; the command must be one the card allows;
 # what is stored is exactly `batch.ruling`'s record, and every reader refuses a stored ruling that is not.
-# Run still stops after the settlement once every card is ruled (freezing is Task 19.7).
+# Once every card is ruled, run freezes the contract (Task 19.7); these tests stop it there.
 ONE, TWO = "D-clamp-001-1", "D-clamp-001-2"
-STOPPED = ("stopped", "stopped after the confirmed settlement")
+STOPPED = ("stopped", "stopped after the contract was frozen")
+
+def frozen(c, root):
+    """A run stopped after the contract, with nothing pending."""
+    return c.run(root / TASK_FILE, stop_after="contract")
 # Policy first: the two names may come in either order.
 WHOLE = '{"policy": "Raise ValueError when hi < lo.", "interface": "clamp(x, lo, hi) -> number"}'
 
@@ -59,7 +63,7 @@ class Rule(unittest.TestCase):
         self.assertEqual((stored(ruled(c)[1])["scope"], stored(ruled(c)[1])["text"], stored(ruled(c)[1])["value"]),
                          ("task", second["a"]["interface"], second["a"]))
         c3, codex3, claude3 = resumed(root, c)
-        self.assertEqual(told(run(c3, root)), STOPPED)
+        self.assertEqual(told(frozen(c3, root)), STOPPED)
         self.assertEqual(c3.status(), [{"task": TASK, "status": "in_progress", "pending": []}])
         self.assertEqual((codex.calls, claude.calls, codex3.calls, claude3.calls), ([], [], [], []))
 
@@ -100,7 +104,7 @@ class Rule(unittest.TestCase):
         self.assertEqual((second["text"], second["value"], second["scope"]),
                          ("clip(x, lo, hi)", {"interface": "clip(x, lo, hi)", "policy": ""}, "project"))
         c2, codex, claude = resumed(root, c)
-        self.assertEqual(told(run(c2, root)), STOPPED)
+        self.assertEqual(told(frozen(c2, root)), STOPPED)
 
     def test_a_refusal_takes_one_combined_note(self):
         root, c, t, settled = refusal()
@@ -128,7 +132,7 @@ class Rule(unittest.TestCase):
         self.assertEqual(decisions.precedents(c.events()), [{"id": "P-1", "question": row["question"], "ruling": text,
                                                               "while": "", "task": TASK}])
         c2, codex, claude = resumed(root, c)
-        self.assertEqual(told(run(c2, root)), STOPPED)
+        self.assertEqual(told(frozen(c2, root)), STOPPED)
 
     def test_a_ruling_whose_words_are_not_utf_8_text_is_refused(self):
         # A JSON escape can carry a lone surrogate into a note no UTF-8 contract or precedent file can hold.

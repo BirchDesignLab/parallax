@@ -511,9 +511,29 @@ class Conductor:
             if task in live:
                 rows.append(self._live_row(task, mine))
             else:
+                try:
+                    self._landed_check(task, mine)
+                except _Stop as stop:
+                    rows.append({"task": task, "status": "blocked", "pending": [], "detail": stop.outcome.detail,
+                                 "affected": []})
+                    continue
                 status = "dropped" if any(e["type"] == "task.dropped" for e in mine) else "landed"
                 rows.append({"task": task, "status": status, "pending": []})
         return rows
+
+    def _landed_check(self, task: str, mine: list[dict]) -> None:
+        """Task 19.7: a confirmed-v1 task only the ledger holds is checked as a live one is, from `mine` alone.
+
+        Its opening, protocol, settlement, rulings and frozen contracts must still be the ones the writer makes,
+        so `run` and `status` refuse a ledger `rule` already refuses. A task opened without the marker is
+        reported as before.
+        """
+        opened = next((e for e in mine if e["type"] == "task.opened"), None)
+        if opened is None or "batch_protocol" not in opened:
+            return
+        t = self._task_of(task, "", opened)
+        self._check_protocol(t, mine)
+        self._published(t, mine)
 
     def _live_row(self, task: str, mine: list[dict]) -> dict:
         """A live task's status row, after the checks `run` makes before it exposes an ID (Task 19.5).
@@ -532,6 +552,9 @@ class Conductor:
                     return {"task": task, "status": "blocked", "pending": [], "detail": _blocked_detail(published[0]),
                             "affected": list(published[0]["affected"])}
                 pending = [row["id"] for row in published[1]] if published else []
+                if published and not pending:
+                    # Task 19.7: then the cards a failed crossing opens, where `_rulings` stops.
+                    pending = [d.id for d in self._pending(mine)]
             else:
                 pending = [d.id for d in self._pending(mine)]
         except _Stop as stop:
@@ -550,7 +573,10 @@ class Conductor:
         text = task_file.read_text(encoding="utf-8")
         if not self.journal.events(task):
             # Nothing in flight: a task already in the ledger is finished, not started again.
-            ended = {e["type"] for e in self.events(task)}
+            mine = self.events(task)
+            ended = {e["type"] for e in mine}
+            if ended & {"task.dropped", "task.integrated"}:
+                self._landed_check(task, mine)              # Task 19.7: blocks on a record no writer makes
             if "task.dropped" in ended:
                 return Outcome("dropped", task, f"{task} was already dropped")
             if "task.integrated" in ended:
@@ -565,11 +591,15 @@ class Conductor:
         self._settle(t)
         self._rulings(t)
         if t.batch:
-            # Task 19.5 publishes the settlement and its cards. Freezing a contract from it is Task 19.6's.
-            return Outcome("stopped", t.id, "stopped after the confirmed settlement")
+            # Task 19.7: a refusal ruled `drop` lands its record before any contract, folder or clone.
+            drop = next((e for e in self.events(t.id) if e["type"] == "ruling.made" and e["choice"] == "drop"), None)
+            if drop is not None:
+                return self._drop(t, drop)
         self._contract(t)
         if stop_after == "contract":
             return Outcome("stopped", t.id, "stopped after the contract was frozen")
+        if t.batch:
+            self._checkouts(t)
         self._braid(t)
         recross = False
         while True:
@@ -616,7 +646,7 @@ class Conductor:
               check_protocol: bool = False) -> _Task:
         """The task's opening, recorded now if it has none. `batch` marks a new opening confirmed-v1.
 
-        Only tests pass `batch` until Task 19.7. A recorded opening is never changed. An opening this
+        Only tests pass `batch` until Task 19.9. A recorded opening is never changed. An opening this
         version cannot read blocks before the task's folder, a checkout or another event is created,
         and so, with `check_protocol` (as `run` passes it), does an event written under another protocol.
         """
@@ -789,15 +819,40 @@ class Conductor:
         Run checks it before any private state, call or append, and before it writes a card; status checks it
         the same way and writes nothing. A ruling must come after the settlement, rule one of its public IDs,
         carry the marker and its settlement_sha, be the only one for that ID, and be exactly what `rule` writes
-        for that row (`batch.ruling_problem`, Task 19.6).
+        for that row (`batch.ruling_problem`, Task 19.6). A frozen contract (Task 19.7) must come after a
+        settlement that is not blocked, carry the marker and its settlement_sha, be version 1 as an integer and
+        the only one (until Task 19.8 no ruling amends a confirmed-v1 contract), follow a ruling on every card,
+        none of them a drop, and carry the sha of the contract the events before it give (`_settled_contract`).
+        These checks read only events, so a landed task replays from the ledger alone.
         """
         events = self.events(t.id) if events is None else events
         settled = self._settlement(t, events)
         rows = {row["id"]: row for row in settled["choices"] if row["id"]} if settled else {}
         public = list(rows)
-        ruled, after = set(), False
-        for e in events:
+        ruled, after, frozen, dropped = set(), False, 0, False
+        for at, e in enumerate(events):
             after = after or e["type"] == "reading.settled"
+            if e["type"] == "contract.frozen":
+                frozen += 1
+                what = f"contract v{e.get('version')}"
+                if not after:
+                    raise _Stop(Outcome("blocked", t.id, f"{what} comes before the reading.settled record"))
+                if settled["mode"] == "blocked":
+                    raise _Stop(Outcome("blocked", t.id, f"{what} freezes a blocked settlement"))
+                if e.get("batch_protocol") != _BATCH_PROTOCOL or e.get("settlement_sha") != settled["settlement_sha"]:
+                    raise _Stop(Outcome("blocked", t.id, f"{what} is not bound to the reading.settled record"))
+                if type(e.get("version")) is not int or e["version"] != frozen:
+                    raise _Stop(Outcome("blocked", t.id, f"{what} is not version {frozen}"))
+                if frozen > 1:
+                    raise _Stop(Outcome("blocked", t.id, f"{what} follows no ruling that amends the contract"))
+                unruled = [name for name in public if name not in ruled]
+                if unruled:
+                    raise _Stop(Outcome("blocked", t.id, f"{what} is frozen before {', '.join(unruled)} is ruled"))
+                if dropped:
+                    raise _Stop(Outcome("blocked", t.id, f"{what} freezes a dropped task"))
+                if e.get("sha") != sha256_text(self._settled_contract(t, settled, events[:at])):
+                    raise _Stop(Outcome("blocked", t.id, f"{what} is not the contract its settlement and rulings give"))
+                continue
             if e["type"] != "ruling.made":
                 continue
             name = e.get("dispute")
@@ -813,6 +868,7 @@ class Conductor:
             if problem:
                 raise _Stop(Outcome("blocked", t.id, f"{name}'s ruling.made {problem}"))
             ruled.add(name)
+            dropped = dropped or e["choice"] == "drop"
         if settled is None:
             return None
         return settled, [row for row in settled["choices"] if row["id"] and row["id"] not in ruled]
@@ -1168,7 +1224,7 @@ class Conductor:
                 ids = ", ".join(row["id"] for row in cards)
                 self.say(f"{t.id}: needs a ruling on {ids}")
                 raise _Stop(Outcome("needs_ruling", t.id, f"needs a ruling on {ids}", cards=tuple(cards)))
-            return
+            # Task 19.7: then the cards a failed crossing opens, as on any task. Ruling them is Task 19.8's.
         pending = self._pending(self.events(t.id))
         if pending:
             ids = ", ".join(d.id for d in pending)
@@ -1178,6 +1234,9 @@ class Conductor:
     # Step 7
     def _contract(self, t: _Task) -> None:
         if self._first(t.id, "contract.frozen") is not None:
+            return
+        if t.batch:
+            self._freeze_settled(t)
             return
         interface, points = self._contract_points(t)
         self._freeze(t, 1, interface, points)
@@ -1197,6 +1256,40 @@ class Conductor:
             elif dispute.kind == "interface" and ruling["choice"] in ("b", "other"):
                 interface = ruling["text"] if t.whole else f"{interface}\nAmended: {ruling['text']}"
         return interface, points
+
+    def _settled_contract(self, t: _Task, settled: dict, events: list[dict]) -> str:
+        """Task 19.7: contract v1 of a confirmed-v1 task, as text, from `events` alone.
+
+        The task text and the precedents are the ones the settlement's packet pinned, and the terms come from
+        the settlement and the rulings in `events`, each checked by the caller. So the writer and every later
+        reader render the same text, whatever the task file or another task's rulings say by then, and no
+        private artifact is read. The text is encoded here, before a file or an event is written.
+        """
+        packet = settled["direct_packet"] if settled["mode"] == "direct" else next(
+            e["packet"] for e in events
+            if e["type"] == "batch.proposed" and batch.digest(e.get("packet")) == settled["packet_sha"])
+        rulings = {e["dispute"]: e for e in events if e["type"] == "ruling.made"}
+        try:
+            interface, terms = batch.contract_terms(settled, rulings)
+            text = decisions.render_contract(t.id, 1, packet["task"], interface, [Point(*term) for term in terms],
+                                             packet["precedents"])
+            text.encode("utf-8")                            # a contract is a UTF-8 file; say so, never the text
+        except UnicodeEncodeError:
+            raise _Stop(Outcome("blocked", t.id, "the contract cannot be frozen: it is not UTF-8 text")) from None
+        except ValueError as exc:
+            raise _Stop(Outcome("blocked", t.id, f"the contract cannot be frozen: {exc}")) from None
+        return text
+
+    def _freeze_settled(self, t: _Task) -> None:
+        """Task 19.7: freeze contract v1 of a confirmed-v1 task, bound to the settlement it was rendered from."""
+        events = self.events(t.id)
+        settled, _ = self._published(t, events)
+        text = self._settled_contract(t, settled, events)
+        self._write(self._run_dir(t) / "contract-v1.md", text)
+        marker = {"interface_protocol": "whole"} if t.whole else {}
+        self.journal.append("contract.frozen", t.id, version=1, sha=sha256_text(text), **marker,
+                            batch_protocol=_BATCH_PROTOCOL, settlement_sha=settled["settlement_sha"])
+        self.say(f"{t.id}: contract v1 frozen")
 
     @staticmethod
     def _mismatch(what: str, task: str, whole: bool) -> str:
@@ -1224,7 +1317,7 @@ class Conductor:
             if e["type"] == "dispute.opened" and e.get("kind") == "interface":
                 what = e["id"]
             elif e["type"] == "contract.frozen":
-                what = f"contract v{e['version']}"
+                what = f"contract v{e.get('version')}"
             else:
                 continue
             if (e.get("interface_protocol") == "whole") != t.whole:
@@ -1238,6 +1331,23 @@ class Conductor:
         marker = {"interface_protocol": "whole"} if t.whole else {}
         self.journal.append("contract.frozen", t.id, version=version, sha=sha256_text(text), **marker)
         self.say(f"{t.id}: contract v{version} frozen")
+
+    def _checkouts(self, t: _Task) -> None:
+        """Task 19.7: the task's folder, and the clone of each seat that has not finished an attempt, made again
+        when missing. After publication `_open` makes neither, so a resumed confirmed-v1 task may have lost both.
+        A seat given a new clone starts a new session there, and its old session is discarded with its folder.
+        """
+        if not t.dir.exists():
+            folders.make_private(t.dir)
+        for seat in t.seats:
+            clone = self._clone_of(t, seat)
+            if self._last(t.id, "attempt.finished", role=t.role(seat)) is not None:
+                continue
+            if clone is None or not clone.is_dir():
+                session = self._session(t, seat)
+                if session and clone is not None:
+                    self.seats[seat].discard(session, clone)
+                self._new_clone(t, seat)
 
     # Step 8
     def _braid(self, t: _Task) -> None:
@@ -1771,6 +1881,8 @@ class Conductor:
         for _ in range(_LAND_TRIES):
             expected = gitops.rev(root, self.cfg.main)
             land = t.dir / "land"
+            if not t.dir.exists():
+                folders.make_private(t.dir)                 # Task 19.7: a drop after publication may find no folder
             if land.exists():
                 self._remove_inside(t.dir, land)
             gitops.clone_at(root, land, expected)
@@ -1852,14 +1964,14 @@ class Conductor:
     # ------------------------------------------------------ task bookkeeping
 
     def _session(self, t: _Task, seat: str) -> str | None:
-        """The seat's live session: from its reading, replaced by later attempts, cleared by a void."""
+        """The seat's live session: from its reading, replaced by later attempts, cleared by a void or a new clone."""
         session = None
         for e in self.events(t.id):
             if e.get("seat") != seat:
                 continue
             if e["type"] in ("reading.sealed", "attempt.finished", "response.done"):
                 session = e.get("session", session)
-            elif e["type"] == "attempt.voided":
+            elif e["type"] in ("attempt.voided", "checkout.created"):
                 session = None
         return session
 

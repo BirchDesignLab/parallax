@@ -1,0 +1,726 @@
+{
+ "history": [
+  {
+   "ts": "<ts>",
+   "type": "task.opened",
+   "task": "clamp-001",
+   "kind": "behavior",
+   "base": "<git-1>",
+   "builder": "codex",
+   "challenger": "claude",
+   "title": "Add clamp(x, lo, hi) to clamplib: returns x limited to the range lo..hi.",
+   "interface_protocol": "whole",
+   "batch_protocol": "confirmed-v1"
+  },
+  {
+   "ts": "<ts>",
+   "type": "checkout.created",
+   "task": "clamp-001",
+   "seat": "codex",
+   "path": "<folder-1>/clamp-001/<clone-1>"
+  },
+  {
+   "ts": "<ts>",
+   "type": "checkout.created",
+   "task": "clamp-001",
+   "seat": "claude",
+   "path": "<folder-1>/clamp-001/<clone-2>"
+  },
+  {
+   "ts": "<ts>",
+   "type": "reading.sealed",
+   "task": "clamp-001",
+   "seat": "codex",
+   "sha": "<sha-1>",
+   "session": "codex-s1",
+   "usage": {
+    "input": 0,
+    "cached": 0,
+    "output": 0
+   }
+  },
+  {
+   "ts": "<ts>",
+   "type": "reading.sealed",
+   "task": "clamp-001",
+   "seat": "claude",
+   "sha": "<sha-2>",
+   "session": "claude-s1",
+   "usage": {
+    "input": 0,
+    "cached": 0,
+    "output": 0
+   }
+  },
+  {
+   "ts": "<ts>",
+   "type": "reveal.done",
+   "task": "clamp-001",
+   "seat": "codex",
+   "sha": "<sha-3>",
+   "usage": {
+    "input": 0,
+    "cached": 0,
+    "output": 0
+   },
+   "batch_protocol": "confirmed-v1"
+  },
+  {
+   "ts": "<ts>",
+   "type": "reveal.done",
+   "task": "clamp-001",
+   "seat": "claude",
+   "sha": "<sha-4>",
+   "usage": {
+    "input": 0,
+    "cached": 0,
+    "output": 0
+   },
+   "batch_protocol": "confirmed-v1"
+  },
+  {
+   "ts": "<ts>",
+   "type": "batch.proposed",
+   "task": "clamp-001",
+   "batch_protocol": "confirmed-v1",
+   "seat": "codex",
+   "opening": "<sha-5>",
+   "packet": {
+    "task": "Add clamp(x, lo, hi) to clamplib: returns x limited to the range lo..hi.\n",
+    "seats": {
+     "builder": "codex",
+     "challenger": "claude"
+    },
+    "precedents": [],
+    "inputs": {
+     "builder": {
+      "reading": "<sha-1>",
+      "reveal": "<sha-3>"
+     },
+     "challenger": {
+      "reading": "<sha-2>",
+      "reveal": "<sha-4>"
+     }
+    },
+    "sources": [
+     {
+      "key": "builder/0",
+      "kind": "reading",
+      "owner": "builder",
+      "question": "What if lo > hi?",
+      "answer": "Raise ValueError when hi < lo. ",
+      "why": " caller error",
+      "agree": false,
+      "counter": " Raise ValueError unless lo <= hi. ",
+      "counter_why": " NaN bounds ",
+      "witness": {
+       "author": "challenger",
+       "scenario": "clamp(8, float('nan'), 5)",
+       "observation": "result or exception",
+       "a": "returns 5",
+       "b": "raises ValueError",
+       "decided_by": ""
+      },
+      "original_witness": {
+       "decided_by": "",
+       "mine": "raises ValueError\n",
+       "observation": "result or exception ",
+       "scenario": " clamp(8, float('nan'), 5) ",
+       "theirs": " returns 5"
+      }
+     },
+     {
+      "key": "builder/1",
+      "kind": "reading",
+      "owner": "builder",
+      "question": " What is returned?",
+      "answer": "One of the objects passed.",
+      "why": "identity",
+      "agree": true,
+      "counter": "",
+      "counter_why": "",
+      "witness": {},
+      "original_witness": {
+       "decided_by": "",
+       "mine": "",
+       "observation": "",
+       "scenario": "",
+       "theirs": ""
+      }
+     },
+     {
+      "key": "challenger/0",
+      "kind": "reading",
+      "owner": "challenger",
+      "question": "What if lo > hi?",
+      "answer": "Raise ValueError unless lo <= hi.",
+      "why": "NaN bounds too",
+      "agree": false,
+      "counter": "Raise ValueError when hi < lo.",
+      "counter_why": "strict only",
+      "witness": {
+       "author": "builder",
+       "scenario": "clamp(1, Lt(0), Lt(2)) with objects defining only __lt__",
+       "observation": "result or exception",
+       "a": "returns 1",
+       "b": "raises TypeError",
+       "decided_by": "What is returned?"
+      },
+      "original_witness": {
+       "decided_by": " What is returned? ",
+       "mine": "returns 1",
+       "observation": "result or exception",
+       "scenario": "clamp(1, Lt(0), Lt(2)) with objects defining only __lt__",
+       "theirs": "raises TypeError"
+      }
+     },
+     {
+      "key": "builder/interface",
+      "kind": "interface",
+      "owner": "builder",
+      "question": "What interface should the contract use?",
+      "answer": "clamp(x, lo, hi)",
+      "why": "",
+      "agree": false,
+      "counter": "clamp(x, lo, hi); clip = clamp",
+      "counter_why": "callers want the short name clip",
+      "witness": {},
+      "original_witness": {}
+     }
+    ],
+    "challenger_interface": "clamp(value, lo, hi)",
+    "predicted_failures": {
+     "builder": [],
+     "challenger": []
+    },
+    "conflicts": {
+     "builder": [],
+     "challenger": []
+    },
+    "reveals": {
+     "builder": {
+      "conflicts": [],
+      "interface_objection": "",
+      "interface_ok": true,
+      "interface_replacement": "",
+      "verdicts": [
+       {
+        "agree": false,
+        "counter": "Raise ValueError when hi < lo.",
+        "index": 0,
+        "why": "strict only",
+        "witness": {
+         "decided_by": " What is returned? ",
+         "mine": "returns 1",
+         "observation": "result or exception",
+         "scenario": "clamp(1, Lt(0), Lt(2)) with objects defining only __lt__",
+         "theirs": "raises TypeError"
+        }
+       }
+      ]
+     },
+     "challenger": {
+      "conflicts": [],
+      "interface_objection": "callers want the short name clip",
+      "interface_ok": false,
+      "interface_replacement": "clamp(x, lo, hi); clip = clamp",
+      "verdicts": [
+       {
+        "agree": true,
+        "counter": "",
+        "index": 1,
+        "why": "",
+        "witness": {
+         "decided_by": "",
+         "mine": "",
+         "observation": "",
+         "scenario": "",
+         "theirs": ""
+        }
+       },
+       {
+        "agree": false,
+        "counter": " Raise ValueError unless lo <= hi. ",
+        "index": 0,
+        "why": " NaN bounds ",
+        "witness": {
+         "decided_by": "",
+         "mine": "raises ValueError\n",
+         "observation": "result or exception ",
+         "scenario": " clamp(8, float('nan'), 5) ",
+         "theirs": " returns 5"
+        }
+       }
+      ]
+     }
+    }
+   },
+   "packet_sha": "<sha-6>",
+   "sha": "<sha-7>",
+   "usage": {
+    "input": 11,
+    "cached": 5,
+    "output": 3
+   }
+  },
+  {
+   "ts": "<ts>",
+   "type": "batch.reviewed",
+   "task": "clamp-001",
+   "batch_protocol": "confirmed-v1",
+   "seat": "claude",
+   "packet_sha": "<sha-6>",
+   "proposal_sha": "<sha-7>",
+   "sha": "<sha-8>",
+   "usage": {
+    "input": 7,
+    "cached": 0,
+    "output": 2
+   }
+  },
+  {
+   "ts": "<ts>",
+   "type": "reading.settled",
+   "task": "clamp-001",
+   "batch_protocol": "confirmed-v1",
+   "interface_protocol": "whole",
+   "mode": "confirmed",
+   "packet_sha": "<sha-6>",
+   "proposal_sha": "<sha-7>",
+   "review_sha": "<sha-8>",
+   "direct_packet": {},
+   "common": [
+    {
+     "slot": "p/0",
+     "question": "What is returned?",
+     "text": "One of the objects passed.",
+     "sources": [
+      "builder/1"
+     ]
+    }
+   ],
+   "withdrawn": [],
+   "proposal": {
+    "packet_sha": "<sha-6>",
+    "decision": "propose",
+    "common": [
+     {
+      "slot": "p/0",
+      "question": "What is returned?",
+      "text": "One of the objects passed.",
+      "sources": [
+       "builder/1"
+      ]
+     }
+    ],
+    "choices": [
+     {
+      "slot": "c/0",
+      "target": "policy",
+      "question": "Which predicate rejects the bounds?",
+      "members": [
+       "builder/0",
+       "challenger/0"
+      ],
+      "a": {
+       "interface": "",
+       "policy": "Raise ValueError when hi < lo."
+      },
+      "b": {
+       "interface": "",
+       "policy": "Raise ValueError unless lo <= hi."
+      },
+      "witnesses": [
+       {
+        "source": "builder/0",
+        "scenario": "clamp(8, float('nan'), 5)",
+        "observation": "result or exception",
+        "a": "returns 5",
+        "b": "raises ValueError"
+       }
+      ]
+     },
+     {
+      "slot": "c/1",
+      "target": "interface",
+      "question": "Should clamplib also export clip?",
+      "members": [
+       "builder/interface"
+      ],
+      "a": {
+       "interface": "clamp(x, lo, hi)",
+       "policy": ""
+      },
+      "b": {
+       "interface": "clamp(x, lo, hi); clip = clamp",
+       "policy": ""
+      },
+      "witnesses": [
+       {
+        "source": "builder/interface",
+        "scenario": "from clamplib import clip",
+        "observation": "whether the import succeeds",
+        "a": "raises ImportError",
+        "b": "imports clamp"
+       }
+      ]
+     }
+    ],
+    "withdrawn": [],
+    "assent": {
+     "coverage": true,
+     "shared_terms": true,
+     "withdrawals": true,
+     "columns_and_witnesses": true,
+     "all_combinations": true
+    },
+    "votes": [
+     {
+      "slot": "c/0",
+      "sign": [
+       "a"
+      ],
+      "reason": "strict comparisons"
+     },
+     {
+      "slot": "c/1",
+      "sign": [
+       "a"
+      ],
+      "reason": "one name is enough"
+     }
+    ],
+    "preferences": [
+     {
+      "slot": "c/0",
+      "answer": "a"
+     },
+     {
+      "slot": "c/1",
+      "answer": "a"
+     }
+    ],
+    "fallback": {
+     "known": true,
+     "members": [
+      "builder/0",
+      "challenger/0",
+      "builder/interface"
+     ],
+     "question": "What complete interface and bounds predicate should clamplib have?"
+    },
+    "refusal_reason": "",
+    "affected": []
+   },
+   "review": {
+    "packet_sha": "<sha-6>",
+    "proposal_sha": "<sha-7>",
+    "decision": "attest",
+    "assent": {
+     "coverage": true,
+     "shared_terms": true,
+     "withdrawals": true,
+     "columns_and_witnesses": true,
+     "all_combinations": true
+    },
+    "votes": [
+     {
+      "slot": "c/0",
+      "sign": [
+       "b"
+      ],
+      "reason": "NaN bounds must raise"
+     },
+     {
+      "slot": "c/1",
+      "sign": [
+       "b"
+      ],
+      "reason": "callers want clip"
+     }
+    ],
+    "fallback_complete": true,
+    "refusal_reason": "",
+    "affected": []
+   },
+   "choices": [
+    {
+     "slot": "c/0",
+     "target": "policy",
+     "kind": "reading",
+     "question": "Which predicate rejects the bounds?",
+     "members": [
+      "builder/0",
+      "challenger/0"
+     ],
+     "a": {
+      "interface": "",
+      "policy": "Raise ValueError when hi < lo."
+     },
+     "b": {
+      "interface": "",
+      "policy": "Raise ValueError unless lo <= hi."
+     },
+     "witnesses": [
+      {
+       "source": "builder/0",
+       "scenario": "clamp(8, float('nan'), 5)",
+       "observation": "result or exception",
+       "a": "returns 5",
+       "b": "raises ValueError"
+      }
+     ],
+     "resolution": "pending",
+     "selected": "",
+     "id": "D-clamp-001-1",
+     "allowed": [
+      "a",
+      "b",
+      "other"
+     ],
+     "card_text": "Dispute D-clamp-001-1 (reading)\n\nWhich predicate rejects the bounds?\n\na) codex (builder):\n| Raise ValueError when hi < lo.\nb) claude (challenger):\n| Raise ValueError unless lo <= hi.\nother) Supply the policy with --note.\n\nVotes:\n- codex (builder) signs a: strict comparisons\n- claude (challenger) signs b: NaN bounds must raise\n\nSources:\n- builder/0: What if lo > hi?\n  codex (builder): Raise ValueError when hi < lo.\n    why: caller error\n  claude (challenger): Raise ValueError unless lo <= hi.\n    why: NaN bounds\n  witness from claude (challenger): clamp(8, float('nan'), 5) (result or exception): codex (builder) returns 5; claude (challenger) raises ValueError\n- challenger/0: What if lo > hi?\n  claude (challenger): Raise ValueError unless lo <= hi.\n    why: NaN bounds too\n  codex (builder): Raise ValueError when hi < lo.\n    why: strict only\n  witness from codex (builder): clamp(1, Lt(0), Lt(2)) with objects defining only __lt__ (result or exception): codex (builder) returns 1; claude (challenger) raises TypeError\n    decided by: What is returned?\n\nPredictions both seats confirmed:\n- builder/0: clamp(8, float('nan'), 5) (result or exception): a) returns 5 b) raises ValueError\n\nparallax rule D-clamp-001-1 a\n"
+    },
+    {
+     "slot": "c/1",
+     "target": "interface",
+     "kind": "interface",
+     "question": "Should clamplib also export clip?",
+     "members": [
+      "builder/interface"
+     ],
+     "a": {
+      "interface": "clamp(x, lo, hi)",
+      "policy": ""
+     },
+     "b": {
+      "interface": "clamp(x, lo, hi); clip = clamp",
+      "policy": ""
+     },
+     "witnesses": [
+      {
+       "source": "builder/interface",
+       "scenario": "from clamplib import clip",
+       "observation": "whether the import succeeds",
+       "a": "raises ImportError",
+       "b": "imports clamp"
+      }
+     ],
+     "resolution": "pending",
+     "selected": "",
+     "id": "D-clamp-001-2",
+     "allowed": [
+      "a",
+      "b",
+      "other"
+     ],
+     "card_text": "Dispute D-clamp-001-2 (interface)\n\nShould clamplib also export clip?\n\na) codex (builder):\n| clamp(x, lo, hi)\nb) claude (challenger):\n| clamp(x, lo, hi); clip = clamp\nother) Supply the complete interface with --note.\n\nVotes:\n- codex (builder) signs a: one name is enough\n- claude (challenger) signs b: callers want clip\n\nSources:\n- builder/interface: What interface should the contract use?\n  codex (builder): clamp(x, lo, hi)\n  claude (challenger): clamp(x, lo, hi); clip = clamp\n    why: callers want the short name clip\n\nPredictions both seats confirmed:\n- builder/interface: from clamplib import clip (whether the import succeeds): a) raises ImportError b) imports clamp\n\nparallax rule D-clamp-001-2 a\n"
+    }
+   ],
+   "refusal_reason": "",
+   "affected": [],
+   "detail": "",
+   "settlement_sha": "<sha-9>"
+  },
+  {
+   "ts": "<ts>",
+   "type": "ruling.made",
+   "task": "clamp-001",
+   "dispute": "D-clamp-001-1",
+   "kind": "reading",
+   "question": "Which predicate rejects the bounds?",
+   "choice": "a",
+   "text": "Raise ValueError when hi < lo.",
+   "scope": "project",
+   "while": "",
+   "limitation": "",
+   "batch_protocol": "confirmed-v1",
+   "settlement_sha": "<sha-9>",
+   "slot": "c/0",
+   "members": [
+    "builder/0",
+    "challenger/0"
+   ],
+   "value": {
+    "interface": "",
+    "policy": "Raise ValueError when hi < lo."
+   }
+  },
+  {
+   "ts": "<ts>",
+   "type": "ruling.made",
+   "task": "clamp-001",
+   "dispute": "D-clamp-001-2",
+   "kind": "interface",
+   "question": "Should clamplib also export clip?",
+   "choice": "b",
+   "text": "clamp(x, lo, hi); clip = clamp",
+   "scope": "task",
+   "while": "",
+   "limitation": "",
+   "batch_protocol": "confirmed-v1",
+   "settlement_sha": "<sha-9>",
+   "slot": "c/1",
+   "members": [
+    "builder/interface"
+   ],
+   "value": {
+    "interface": "clamp(x, lo, hi); clip = clamp",
+    "policy": ""
+   }
+  },
+  {
+   "ts": "<ts>",
+   "type": "contract.frozen",
+   "task": "clamp-001",
+   "version": 1,
+   "sha": "<sha-10>",
+   "interface_protocol": "whole",
+   "batch_protocol": "confirmed-v1",
+   "settlement_sha": "<sha-9>"
+  },
+  {
+   "ts": "<ts>",
+   "type": "checkout.created",
+   "task": "clamp-001",
+   "seat": "codex",
+   "path": "<folder-1>/clamp-001/<clone-3>"
+  },
+  {
+   "ts": "<ts>",
+   "type": "checkout.created",
+   "task": "clamp-001",
+   "seat": "claude",
+   "path": "<folder-1>/clamp-001/<clone-4>"
+  },
+  {
+   "ts": "<ts>",
+   "type": "attempt.started",
+   "task": "clamp-001",
+   "n": 1,
+   "role": "builder",
+   "seat": "codex"
+  },
+  {
+   "ts": "<ts>",
+   "type": "attempt.started",
+   "task": "clamp-001",
+   "n": 1,
+   "role": "challenger",
+   "seat": "claude"
+  },
+  {
+   "ts": "<ts>",
+   "type": "attempt.finished",
+   "task": "clamp-001",
+   "n": 1,
+   "role": "builder",
+   "seat": "codex",
+   "commit": "<git-2>",
+   "session": "codex-s1",
+   "mutants": [
+    {
+     "id": "m1",
+     "description": "m1",
+     "files": [
+      "clamplib/__init__.py"
+     ]
+    },
+    {
+     "id": "m2",
+     "description": "m2",
+     "files": [
+      "clamplib/__init__.py"
+     ]
+    },
+    {
+     "id": "m3",
+     "description": "m3",
+     "files": [
+      "clamplib/__init__.py"
+     ]
+    }
+   ],
+   "files": [
+    {
+     "path": "clamplib/__init__.py",
+     "change": "modify",
+     "purpose": "kit"
+    }
+   ],
+   "usage": {
+    "input": 0,
+    "cached": 0,
+    "output": 0
+   }
+  },
+  {
+   "ts": "<ts>",
+   "type": "attempt.finished",
+   "task": "clamp-001",
+   "n": 1,
+   "role": "challenger",
+   "seat": "claude",
+   "commit": "<git-3>",
+   "session": "claude-s1",
+   "mutants": [],
+   "files": [
+    {
+     "path": "tests/test_clamp.py",
+     "change": "add",
+     "purpose": "kit"
+    }
+   ],
+   "usage": {
+    "input": 0,
+    "cached": 0,
+    "output": 0
+   }
+  },
+  {
+   "ts": "<ts>",
+   "type": "crossing.done",
+   "task": "clamp-001",
+   "n": 1,
+   "passed": true,
+   "timed_out": false,
+   "count": 5,
+   "mutants": {
+    "m1": "killed",
+    "m2": "killed",
+    "m3": "killed"
+   },
+   "builder": "<git-2>",
+   "challenger": "<git-3>",
+   "evidence": [],
+   "mutant_of": {}
+  },
+  {
+   "ts": "<ts>",
+   "type": "task.integrated",
+   "task": "clamp-001",
+   "verdict": "ruled",
+   "checks": "5 probes passed, 3 of 3 mutants caught",
+   "limitations": []
+  }
+ ],
+ "cli": [
+  [
+   [
+    "status"
+   ],
+   0,
+   "clamp-001  landed\n",
+   ""
+  ],
+  [
+   [
+    "rule",
+    "D-clamp-001-1",
+    "b"
+   ],
+   1,
+   "",
+   "parallax: D-clamp-001-1 is already ruled\n"
+  ]
+ ]
+}

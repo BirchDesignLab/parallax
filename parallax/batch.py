@@ -735,3 +735,46 @@ def ruling_problem(settled: dict, row: dict, event: dict) -> str | None:
         if stored[field] != expected[field]:
             return f"has a {field} its card does not give"
     return None
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The contract a settlement freezes (Task 19.7)
+
+def _settled_source(row: dict) -> str:
+    """Where an automatic row's value came from, as a contract decision names it."""
+    if row["resolution"] == "mutual":
+        return f"both seats signed {row['selected']}"
+    return f"both seats signed both; the builder preferred {row['selected']}"
+
+
+def contract_terms(settled: dict, rulings: dict) -> tuple[str, list[tuple[str, str, str]]]:
+    """The interface and the (question, answer, source) decisions a contract takes from `settled`.
+
+    The common terms come first, in their order, then one value per choice in slot order: an automatic row's
+    selected column, or a public row's ruling (`rulings` by ID, each already checked by the caller). A combined
+    value gives both its interface and its policy, each once. Exactly one interface results. ValueError when a
+    public row has no ruling or is dropped, or when the settlement gives no interface or more than one.
+    """
+    interfaces, points = [], []
+    for term in settled["common"]:
+        if term["slot"] == "interface":
+            interfaces.append(term["text"])
+        else:
+            points.append((term["question"], term["text"], "agreed"))
+    for row in settled["choices"]:
+        if row["id"]:
+            ruled = rulings.get(row["id"])
+            if ruled is None:
+                raise ValueError(f"{row['id']} has no ruling")
+            if ruled["choice"] == "drop":
+                raise ValueError(f"{row['id']} drops the task")
+            value, source = ruled["value"], f"ruled {row['id']}"
+        else:
+            value, source = row[row["selected"]], _settled_source(row)
+        if row["target"] in ("interface", "combined"):
+            interfaces.append(value["interface"])
+        if row["target"] in ("policy", "combined"):
+            points.append((row["question"], value["policy"], source))
+    if len(interfaces) != 1:
+        raise ValueError(f"the settlement gives {len(interfaces)} interfaces, not one")
+    return interfaces[0], points
