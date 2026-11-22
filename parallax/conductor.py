@@ -266,6 +266,12 @@ def _batch_mismatch(t: _Task, event: dict) -> str | None:
     return None
 
 
+def _holds_card(event: dict, dispute_id: str) -> bool:
+    """Whether `event` is a reading.settled record with a row whose ID is `dispute_id`, checked or not."""
+    rows = event.get("choices") if event["type"] == "reading.settled" else None
+    return isinstance(rows, list) and any(isinstance(row, dict) and row.get("id") == dispute_id for row in rows)
+
+
 _SETTLEMENT_FIELDS = ("batch_protocol", "interface_protocol", "mode", "packet_sha", "proposal_sha", "review_sha",
                       "direct_packet", "common", "withdrawn", "proposal", "review", "choices", "refusal_reason",
                       "affected", "detail")
@@ -416,21 +422,27 @@ class Conductor:
     def _rule(self, dispute_id: str, choice: str, note: str, scope: str | None,
               while_: str, limitation: str) -> None:
         events = self.events()
+        holders = list(dict.fromkeys(e["task"] for e in events if _holds_card(e, dispute_id)))
+        if holders:
+            self._rule_card(holders, dispute_id, choice, note, scope, while_, limitation)
+            return
         opened = [e for e in events if e["type"] == "dispute.opened" and e.get("id") == dispute_id]
         if not opened:
             raise ValueError(f"unknown dispute {dispute_id}")
-        task_opened = self._first(opened[-1]["task"], "task.opened") or {}
-        if task_opened.get("batch_protocol") == _BATCH_PROTOCOL:
-            # Task 19.5: no legacy ruling on a confirmed-v1 task; its cards are its settlement's, which 19.6 rules.
-            # A standalone card is refused with what run and status report first (a standalone reading or
-            # interface card is itself such a problem), or else as standalone.
+        task_opened = self._first(opened[-1]["task"], "task.opened")
+        if task_opened is not None:
+            # Task 19.6: a legacy ruling only on a task run accepts, so its opening and protocol are checked as run
+            # checks them, and on a confirmed-v1 task its settlement too. There a standalone card is then refused
+            # (Task 19.5): that task's cards are its settlement's.
             try:
                 t = self._task_of(opened[-1]["task"], "", task_opened)
                 self._check_protocol(t)
-                self._published(t)
+                if t.batch:
+                    self._published(t)
             except _Stop as stop:
                 raise ValueError(stop.outcome.detail) from None
-            raise ValueError(f"{dispute_id} is a standalone {opened[-1].get('kind')} card on a {_BATCH_PROTOCOL} task")
+            if t.batch:
+                raise ValueError(f"{dispute_id} is a standalone {opened[-1].get('kind')} card on a {_BATCH_PROTOCOL} task")
         if any(e["type"] == "ruling.made" and e.get("dispute") == dispute_id for e in events):
             raise ValueError(f"{dispute_id} is already ruled")
         dispute = Dispute.from_event(opened[-1])
@@ -456,6 +468,27 @@ class Conductor:
         self.journal.append("ruling.made", opened[-1]["task"], dispute=dispute_id, kind=dispute.kind,
                             question=dispute.question, choice=choice, text=text, scope=scope,
                             **{"while": while_}, limitation=limitation)
+
+    def _rule_card(self, holders: list[str], dispute_id: str, choice: str, note: str, scope: str | None,
+                   while_: str, limitation: str) -> None:
+        """Rule a confirmed-v1 card (Task 19.6): the task whose reading.settled holds the ID is checked as run
+        checks it, and the card must be one of its public rows still without a ruling."""
+        if len(holders) > 1:
+            raise ValueError(f"{dispute_id} is a card of more than one task's reading.settled: {', '.join(holders)}")
+        task = holders[0]
+        opened = self._first(task, "task.opened")
+        if opened is None:
+            raise ValueError(f"{task}'s reading.settled has no task.opened")
+        try:
+            t = self._task_of(task, "", opened)
+            self._check_protocol(t)
+            settled, cards = self._published(t)
+        except _Stop as stop:
+            raise ValueError(stop.outcome.detail) from None
+        row = next((row for row in cards if row["id"] == dispute_id), None)
+        if row is None:
+            raise ValueError(f"{dispute_id} is already ruled")
+        self.journal.append("ruling.made", task, **batch.ruling(settled, row, choice, note, scope, while_, limitation))
 
     def events(self, task: str | None = None) -> list[dict]:
         """The ledger as committed on main, followed by the journal."""
@@ -755,12 +788,13 @@ class Conductor:
 
         Run checks it before any private state, call or append, and before it writes a card; status checks it
         the same way and writes nothing. A ruling must come after the settlement, rule one of its public IDs,
-        carry the marker and its settlement_sha, and be the only one for that ID. Checking its choice, value
-        and scope is Task 19.6's, with writing one.
+        carry the marker and its settlement_sha, be the only one for that ID, and be exactly what `rule` writes
+        for that row (`batch.ruling_problem`, Task 19.6).
         """
         events = self.events(t.id) if events is None else events
         settled = self._settlement(t, events)
-        public = [row["id"] for row in settled["choices"] if row["id"]] if settled else []
+        rows = {row["id"]: row for row in settled["choices"] if row["id"]} if settled else {}
+        public = list(rows)
         ruled, after = set(), False
         for e in events:
             after = after or e["type"] == "reading.settled"
@@ -775,6 +809,9 @@ class Conductor:
                 raise _Stop(Outcome("blocked", t.id, f"{name}'s ruling.made is not bound to the reading.settled record"))
             if name in ruled:
                 raise _Stop(Outcome("blocked", t.id, f"{name} has more than one ruling.made"))
+            problem = batch.ruling_problem(settled, rows[name], e)
+            if problem:
+                raise _Stop(Outcome("blocked", t.id, f"{name}'s ruling.made {problem}"))
             ruled.add(name)
         if settled is None:
             return None
@@ -1630,11 +1667,12 @@ class Conductor:
                 and e["dispute"] in mutant_of}
 
     def _next_dispute_number(self, t: _Task) -> int:
-        """Continue the task's dispute numbering past every id opened or reserved."""
+        """Continue the task's dispute numbering past every id opened, reserved or published as a card."""
         pattern = re.compile(rf"D-{re.escape(t.id)}-(\d+)")
         used = [0]
         for e in self.events(t.id):
-            ids = [e["id"]] if e["type"] == "dispute.opened" else e.get("evidence", []) if e["type"] == "crossing.done" else []
+            ids = ([e["id"]] if e["type"] == "dispute.opened" else e.get("evidence", []) if e["type"] == "crossing.done"
+                   else [row["id"] for row in e["choices"]] if e["type"] == "reading.settled" else [])
             used.extend(int(m.group(1)) for i in ids if (m := pattern.fullmatch(i)))
         return max(used) + 1
 

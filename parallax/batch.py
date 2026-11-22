@@ -625,3 +625,113 @@ def card_text(row: dict, packet: dict, record: dict, proposal: dict, review: dic
                       f"a) {_inline(w['a'])} b) {_inline(w['b'])}" for w in row["witnesses"]]
         lines += ["", f"parallax rule {row['id']} a"]
     return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------------------------------------
+# A ruling on a public row (Task 19.6)
+
+RULING_FIELDS = ("dispute", "kind", "question", "choice", "text", "scope", "while", "limitation", "batch_protocol",
+                 "settlement_sha", "slot", "members", "value")
+_EMPTY_VALUE = {"interface": "", "policy": ""}
+_COMBINED_NOTE = ('a combined note must be one JSON object with exactly the string fields "interface" and "policy", '
+                  "neither blank")
+
+
+def combined_text(value: dict) -> str:
+    """A combined value as one standalone string: its ruling's text, and so its precedent's."""
+    return f"Interface:\n{value['interface']}\nPolicy:\n{value['policy']}"
+
+
+def _value_text(target: str, value: dict) -> str:
+    return combined_text(value) if target == "combined" else value[target]
+
+
+def _once_each(pairs: list) -> dict:
+    """A JSON object whose names are all different: a repeated name would silently keep only its last value."""
+    if len({name for name, _ in pairs}) != len(pairs):
+        raise ValueError("a name is repeated")
+    return dict(pairs)
+
+
+def _other_value(target: str, note: str) -> dict:
+    """The value an `other` note supplies for `target`: the note itself, or a combined note's two fields."""
+    if target != "combined":
+        if not note.strip():
+            raise ValueError("choice 'other' needs a note")
+        return {**_EMPTY_VALUE, target: note}
+    try:
+        value = json.loads(note, object_pairs_hook=_once_each)
+    except ValueError:
+        raise ValueError(_COMBINED_NOTE) from None
+    if (not isinstance(value, dict) or set(value) != {"interface", "policy"}
+            or not all(isinstance(text, str) and text.strip() for text in value.values())):
+        raise ValueError(_COMBINED_NOTE)
+    return {"interface": value["interface"], "policy": value["policy"]}
+
+
+def ruling(settled: dict, row: dict, choice: str, note: str = "", scope: str | None = None, while_: str = "",
+           limitation: str = "") -> dict:
+    """The ruling.made fields, in RULING_FIELDS order, that `choice` on `settled`'s public `row` records.
+
+    `a` or `b` records the row's column and takes no nonblank note; `other` records the note as the row's
+    target (a combined note is a JSON object naming each field once); a refusal's `drop` records empty values
+    and the note, or a default, as the reason. A reading card defaults to project scope, any other card to
+    task, and `drop` is always task. The text, while and limitation must be UTF-8 text. ValueError says what
+    is wrong.
+    """
+    if not all(isinstance(text, str) for text in (note, while_, limitation)):
+        raise ValueError("note, while and limitation must be text")
+    if choice not in row["allowed"]:
+        raise ValueError(f"{row['id']} allows {', '.join(row['allowed'])}, not {choice!r}")
+    if choice in ("a", "b"):
+        if note.strip():
+            raise ValueError(f"choice {choice!r} takes no note: the card's {choice} column is the ruling")
+        value = row[choice]
+        text = _value_text(row["target"], value)
+    elif choice == "other":
+        value = _other_value(row["target"], note)
+        text = _value_text(row["target"], value)
+    else:
+        value, text = dict(_EMPTY_VALUE), note.strip() or "Drop this task."
+    if choice == "drop":
+        scope = "task"
+    elif scope is None:
+        scope = "project" if row["kind"] == "reading" else "task"
+    if scope not in ("task", "project"):
+        raise ValueError(f"scope must be 'task' or 'project', not {scope!r}")
+    for field, words in (("text", text), ("while", while_), ("limitation", limitation)):
+        try:
+            words.encode("utf-8")                # a contract and a precedent are UTF-8 files
+        except UnicodeEncodeError:
+            raise ValueError(f"the ruling's {field} is not UTF-8 text") from None
+    return {"dispute": row["id"], "kind": row["kind"], "question": row["question"], "choice": choice, "text": text,
+            "scope": scope, "while": while_, "limitation": limitation, "batch_protocol": settled["batch_protocol"],
+            "settlement_sha": settled["settlement_sha"], "slot": row["slot"], "members": list(row["members"]),
+            "value": value}
+
+
+def ruling_problem(settled: dict, row: dict, event: dict) -> str | None:
+    """Why a stored ruling.made `event` on `row` is not one `ruling` writes, or None.
+
+    The note is recovered from what was stored (an `other` value's target, a combined value as JSON, a drop's
+    text), `ruling` is asked again with the stored choice, scope, while and limitation, and every field must
+    then be what it returns, in its order.
+    """
+    choice, value = event.get("choice"), event.get("value")
+    if choice == "other" and row["target"] == "combined":
+        note = json.dumps(value)
+    elif choice == "other":
+        note = value.get(row["target"]) if isinstance(value, dict) else None
+    else:
+        note = event.get("text") if choice == "drop" else ""
+    try:
+        expected = ruling(settled, row, choice, note, event.get("scope"), event.get("while"), event.get("limitation"))
+    except ValueError as exc:
+        return f"is not one rule writes: {exc}"
+    stored = {field: event[field] for field in event if field not in ("ts", "type", "task")}
+    if list(stored) != list(expected):
+        return f"has the fields {', '.join(stored)}, not {', '.join(expected)}"
+    for field in RULING_FIELDS:
+        if stored[field] != expected[field]:
+            return f"has a {field} its card does not give"
+    return None
