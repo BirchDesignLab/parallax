@@ -7,7 +7,7 @@ from parallax.schemas import validate
 from parallax.seats.stub import StubSeat
 from tests.conductor_kit import kit_conductor, make_project
 from tests.helpers import write
-from tests.test_conductor_batch import MARK, evidence, record_reveal
+from tests.test_conductor_batch import MARK, evidence, proposes, record_reveal, reviews
 from tests.test_conductor_reading import resumed
 from tests.test_decisions import NAN_WITNESS, ROLE_READINGS, ROLE_REVEALS, conflict, without
 
@@ -16,7 +16,8 @@ from tests.test_decisions import NAN_WITNESS, ROLE_READINGS, ROLE_REVEALS, confl
 TASK = "clamp-001"
 TASK_FILE = "tasks/clamp-001.md"
 CHORE, CHORE_FILE = "docs-001", "tasks/docs-001.md"     # make_project's chore
-STOPPED = ("stopped", "stopped after the confirmed reveals")
+# Since Task 19.5 a marked run goes on from its reveals to settle and publish: one pending card.
+SETTLED = ("needs_ruling", "needs a ruling on D-clamp-001-1")
 UNMARKED_REVEALS = {role: without(ROLE_REVEALS[role], "conflicts") for role in ROLE_REVEALS}
 # A witness whose two predictions differ only in a directory: the same words once scrubbed.
 PATH_WITNESS = {**NAN_WITNESS, "theirs": r'returns "C:\Users\me\a\out.txt"', "mine": r'returns "D:\other\out.txt"'}
@@ -44,7 +45,9 @@ def project(batch=True, builder="codex", reveals=ROLE_REVEALS, builder_reveal=No
     challenger = "claude" if builder == "codex" else "codex"
     steps = {"builder": builder_reveal or [answers(reveals["builder"])],
              "challenger": challenger_reveal or [answers(reveals["challenger"])]}
-    stubs = {seat: StubSeat(seat, {"reading": [answers(ROLE_READINGS[role])], "reveal": list(steps[role])})
+    batch_steps = {"builder": {"batch_propose": [proposes()]}, "challenger": {"batch_review": [reviews()]}}
+    stubs = {seat: StubSeat(seat, {"reading": [answers(ROLE_READINGS[role])], "reveal": list(steps[role]),
+                                   **batch_steps[role]})
              for seat, role in ((builder, "builder"), (challenger, "challenger"))}
     c = kit_conductor(root, stubs["codex"], stubs["claude"])
     t = c._open(TASK, (root / TASK_FILE).read_text(encoding="utf-8"), builder, batch=batch)
@@ -185,12 +188,14 @@ class Reveals(unittest.TestCase):
         for builder in ("codex", "claude"):
             with self.subTest(builder=builder):
                 root, c, t, bstub, cstub = project(builder=builder)
-                self.assertEqual(ran(c, root), STOPPED)
+                self.assertEqual(ran(c, root), SETTLED)
                 self.assertEqual(types(c), ["task.opened", "checkout.created", "checkout.created", "reading.sealed",
-                                            "reading.sealed", "reveal.done", "reveal.done"])
+                                            "reading.sealed", "reveal.done", "reveal.done", "batch.proposed",
+                                            "batch.reviewed", "reading.settled"])
                 inputs = {}
                 for stub, role, other in ((bstub, "builder", "challenger"), (cstub, "challenger", "builder")):
-                    self.assertEqual(stages(stub), ["reading", "reveal"])
+                    self.assertEqual(stages(stub), ["reading", "reveal", {"builder": "batch_propose",
+                                                                         "challenger": "batch_review"}[role]])
                     request = stub.calls[1]
                     self.assertIs(request.schema, schemas.REVEAL_CONFIRMED)
                     self.assertFalse(request.writable)
@@ -226,14 +231,21 @@ class Reveals(unittest.TestCase):
             ({**good, "conflicts": [conflict("builder/9", "builder/0")]}, "conflict 0: unknown source builder/9"),
             ({**good, "verdicts": [good["verdicts"][0], path_verdict]},
              "after scrubbing: " + decisions.witness_problem(redact.scrub_values(path_verdict))),
+            # Task 19.5: one scrub keeps these predictions apart, but it exposes a second path start (two
+            # backslashes before `<outside>`), and the second scrub joins them, as the packet shows them.
+            ({**good, "verdicts": [good["verdicts"][0], {**path_verdict, "witness": {
+                **PATH_WITNESS, "theirs": 'returns "' + "\\" * 2 + '/home/me/a.txt ',
+                "mine": 'returns "' + "\\" * 2 + '/home/me/b.txt '}}]},
+             "after scrubbing: " + decisions.witness_problem({**path_verdict, "witness": {
+                 **PATH_WITNESS, "theirs": 'returns "<outside>', "mine": 'returns "<outside>'}})),
             ({**good, "interface_ok": False, "interface_objection": "name it value"},
              "interface_replacement must hold the complete interface you want when interface_ok is false"),
         ]
         for bad, reason in cases:
             with self.subTest(reason=reason):
                 root, c, t, bstub, cstub = project(challenger_reveal=[answers(bad), answers(good)])
-                self.assertEqual(ran(c, root), STOPPED)
-                self.assertEqual(stages(cstub), ["reading", "reveal", "reveal"])
+                self.assertEqual(ran(c, root), SETTLED)
+                self.assertEqual(stages(cstub), ["reading", "reveal", "reveal", "batch_review"])
                 self.assertEqual(cstub.calls[2].brief, briefs.rejected(cstub.calls[1].brief, reason))
                 done = c._last(TASK, "reveal.done", seat="claude")
                 self.assertEqual((done["batch_protocol"], c._stored(t, "claude", "reveal", done["sha"])),
@@ -253,22 +265,32 @@ class Reveals(unittest.TestCase):
         root, c, t, bstub, cstub = project()
         c._readings(t)
         c._reveal_one(t, "codex", {t.role(s): c._reading(t, s) for s in t.seats})
-        codex = StubSeat("codex", {})
-        claude = StubSeat("claude", {"reveal": [answers(ROLE_REVEALS["challenger"])]})
+        codex = StubSeat("codex", {"batch_propose": [proposes()]})
+        claude = StubSeat("claude", {"reveal": [answers(ROLE_REVEALS["challenger"])], "batch_review": [reviews()]})
         c2 = Conductor(load_config(root), {"codex": codex, "claude": claude}, say=lambda s: None, home=c.home)
-        self.assertEqual(ran(c2, root), STOPPED)
-        self.assertEqual((stages(codex), stages(claude)), ([], ["reveal"]))
+        self.assertEqual(ran(c2, root), SETTLED)
+        self.assertEqual((stages(codex), stages(claude)), (["batch_propose"], ["reveal", "batch_review"]))
         self.assertEqual(claude.calls[0].session, c2._sealed(t, "claude")["session"])
         self.assertEqual(c2._confirm_inputs(t, c2.events(TASK))[1], ROLE_REVEALS)
 
-    def test_a_marked_task_resumes_after_its_reveals_with_no_calls(self):
-        root, c, t, bstub, cstub = project()
-        ran(c, root)
-        c2, codex, claude = resumed(root, c)
-        before = evidence(c2, t)
-        self.assertEqual(ran(c2, root), STOPPED)
-        self.assertEqual((codex.calls, claude.calls, evidence(c2, t)), ([], [], before))
-        self.assertEqual(c2.status(), [{"task": TASK, "status": "in_progress", "pending": []}])
+    def test_a_restart_after_both_reveals_calls_only_the_batch_seats(self):
+        root, c, t, _, _ = project()
+        c._readings(t)
+        c._reveal(t)
+        prefix = c.events(TASK)
+        self.assertEqual([e["type"] for e in prefix][-2:], ["reveal.done", "reveal.done"])
+        self.assertFalse(any(e["type"] in ("batch.proposed", "batch.reviewed", "reading.settled")
+                             for e in prefix))
+        codex = StubSeat("codex", {"batch_propose": [proposes()]})
+        claude = StubSeat("claude", {"batch_review": [reviews()]})
+        c2 = Conductor(load_config(root), {"codex": codex, "claude": claude},
+                       say=lambda s: None, home=c.home)
+        self.assertEqual(ran(c2, root), SETTLED)
+        self.assertEqual((stages(codex), stages(claude)), (["batch_propose"], ["batch_review"]))
+        events = c2.events(TASK)
+        self.assertEqual(events[:len(prefix)], prefix)
+        self.assertEqual([e["type"] for e in events[len(prefix):]],
+                         ["batch.proposed", "batch.reviewed", "reading.settled"])
 
 
 class Guards(unittest.TestCase):
@@ -289,8 +311,10 @@ class Guards(unittest.TestCase):
         for seat, role in (("claude", "challenger"), ("codex", "builder")):
             with self.subTest(seat=seat, case="valid"):
                 root, c, t, stubs = self.recorded(seat)
-                self.assertEqual(ran(c, root), STOPPED)
-                self.assertEqual((stages(stubs[seat]), stages(stubs[t.other(seat)])), (["reading"], ["reading", "reveal"]))
+                self.assertEqual(ran(c, root), SETTLED)
+                calls = {"builder": "batch_propose", "challenger": "batch_review"}
+                self.assertEqual((stages(stubs[seat]), stages(stubs[t.other(seat)])),
+                                 (["reading", calls[role]], ["reading", "reveal", calls[t.role(t.other(seat))]]))
         challenger = ROLE_REVEALS["challenger"]
         path_verdict = {**challenger["verdicts"][1], "witness": PATH_WITNESS}
         t18 = without(challenger, "conflicts")
@@ -358,8 +382,8 @@ class Guards(unittest.TestCase):
             c._readings(t)
             reseal(c, t, "codex")
             record_reveal(c, t, "claude", ROLE_REVEALS["challenger"])
-            self.assertEqual(ran(c, root), STOPPED)
-            self.assertEqual((stages(bstub), stages(cstub)), (["reading", "reveal"], ["reading"]))
+            self.assertEqual(ran(c, root), SETTLED)
+            self.assertEqual((stages(bstub), stages(cstub)), (["reading", "reveal", "batch_propose"], ["reading", "batch_review"]))
 
     def test_an_owed_reveal_needs_its_sealed_session_before_any_call(self):
         for name, change in (("null", lambda e: e.update(session=None)), ("absent", lambda e: e.pop("session"))):

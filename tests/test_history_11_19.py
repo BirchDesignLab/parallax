@@ -22,7 +22,7 @@ RULING_FIELDS = ["ts", "type", "task", "dispute", "kind", "question", "choice", 
 @contextlib.contextmanager
 def never_batched():
     """Fail if anything enters the batch step, or builds a batch packet in memory, on recorded history."""
-    with mock.patch.object(Conductor, "_confirm", side_effect=AssertionError("the batch step ran on recorded history")),             mock.patch.object(batch, "packet", side_effect=AssertionError("a batch packet was built on recorded history")):
+    with mock.patch.object(Conductor, "_certified", side_effect=AssertionError("the batch step ran on recorded history")),             mock.patch.object(batch, "packet", side_effect=AssertionError("a batch packet was built on recorded history")):
         yield
 
 def without_ts(event):

@@ -68,6 +68,10 @@ def _report(outcome: Outcome) -> int:
         print()
         print(render_card(dispute), end="")
         print()
+    for card in outcome.cards:                 # a confirmed-v1 settlement's card, as recorded
+        print()
+        print(card["card_text"], end="")
+        print()
     print(f"{outcome.task}: {outcome.status}" + (f"  {outcome.detail}" if outcome.detail else ""))
     return _EXIT.get(outcome.status, 3)
 
@@ -109,10 +113,18 @@ def _demo(args) -> int:
     elif outcome.status == "needs_ruling":
         for dispute in outcome.disputes:
             print(f'rule with: python -m parallax rule {dispute.id} a --repo "{where}"   (or b)')
+        for card in outcome.cards:
+            print(_rule_hint(card, where))
         print(f"then run: {again}")
     elif outcome.status in ("blocked", "parked"):
         print(f"after fixing the cause, run: {again}")
     return code
+
+
+def _rule_hint(card: dict, where: Path) -> str:
+    """How to rule on a confirmed-v1 card: its first allowed command, then the others it allows."""
+    first, *others = [f"{command} --note TEXT" if command == "other" else command for command in card["allowed"]]
+    return f'rule with: python -m parallax rule {card["id"]} {first} --repo "{where}"   (or {", ".join(others)})'
 
 
 def _rule(args, root: Path) -> int:
@@ -126,7 +138,8 @@ def _rule(args, root: Path) -> int:
 
 def _status(root: Path) -> int:
     for row in Conductor(load_config(root), {}, say=print).status():
-        print("  ".join([row["task"], row["status"], *([" ".join(row["pending"])] if row["pending"] else [])]))
+        print("  ".join([row["task"], row["status"], *([" ".join(row["pending"])] if row["pending"] else []),
+                         *([row["detail"]] if row.get("detail") else [])]))
     return 0
 
 

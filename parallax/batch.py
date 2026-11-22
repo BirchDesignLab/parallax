@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import json
+import unicodedata
 from typing import Sequence
 
 from parallax import redact
@@ -29,9 +30,21 @@ def digest(value) -> str:
     return sha256_text(canonical(value))
 
 
+def public(value):
+    """`value` as confirmed-v1 shows it: every string scrubbed until another scrub changes nothing (Task 19.5).
+
+    One scrub need not be stable: replacing a path can expose a new path start, as two backslashes before
+    `<outside>`. Each scrub that changes the text replaces at least one character outside every earlier
+    `<outside>` marker, which holds no path start, so this ends.
+    """
+    while (scrubbed := redact.scrub_values(value)) != value:
+        value = scrubbed
+    return value
+
+
 def accepted(reply: dict) -> dict:
-    """The value that is checked, stored and shown: `reply` with every string scrubbed."""
-    return redact.scrub_values(reply)
+    """The value that is checked, stored and shown: `reply` made `public`, so scrubbing it again changes nothing."""
+    return public(reply)
 
 
 def _clean_text(value) -> bool:
@@ -49,6 +62,9 @@ def packet(task_text: str, precedents: Sequence[dict], readings: dict[str, dict]
             or not all(_clean_text(seats[role]) and seats[role] for role in _ROLES)
             or seats["builder"] == seats["challenger"]):
         raise ValueError(_SEATS_ERROR)
+    # The rows come from the public values the seats see, so a reader holding only this packet derives the
+    # same rows (Task 19.5): scrubbing a path, then trimming, need not equal trimming, then scrubbing.
+    readings, reveals = public(readings), public(reveals)
     rows = sources(readings, reveals)
     built = {
         "task": task_text,
@@ -62,7 +78,7 @@ def packet(task_text: str, precedents: Sequence[dict], readings: dict[str, dict]
                             for c in reveals[role]["conflicts"]] for role in _ROLES},
         "reveals": {role: reveals[role] for role in _ROLES},
     }
-    return redact.scrub_values(copy.deepcopy(built))
+    return public(copy.deepcopy(built))
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -478,3 +494,134 @@ def direct_settlement(packet: dict) -> dict:
                         "a": columns[0], "b": columns[1], "witnesses": witnesses, "resolution": "pending",
                         "selected": ""})
     return _record("direct", common, [], choices)
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The card a public row shows (Task 19.5)
+
+_OTHER = {"policy": "other) Supply the policy with --note.",
+          "interface": "other) Supply the complete interface with --note.",
+          "combined": 'other) Supply both in one --note holding a JSON object: {"interface": "...", "policy": "..."}'}
+
+
+def _hidden(char: str) -> bool:
+    """A character a terminal does not show as itself: a control (a carriage return moves the cursor back), a
+    format character (a bidirectional override reorders the line) or a line or paragraph separator. The line
+    feed is a block's own separator."""
+    return char != "\n" and unicodedata.category(char) in ("Cc", "Cf", "Zl", "Zp")
+
+
+def _literal(text: str) -> str:
+    """`text` as one JSON string literal with every hidden character escaped: one line, shown as written."""
+    out = []
+    for char in json.dumps(text, ensure_ascii=False):
+        code = ord(char)
+        if not _hidden(char):
+            out.append(char)
+        elif code > 0xFFFF:
+            code -= 0x10000
+            out.append(f"\\u{0xD800 + (code >> 10):04x}\\u{0xDC00 + (code & 0x3FF):04x}")
+        else:
+            out.append(f"\\u{code:04x}")
+    return "".join(out)
+
+
+def _block(text: str, indent: str = "") -> list[str]:
+    """`text` exactly, one `| ` line per line: indentation, blank lines and a final line break all survive.
+    Text holding a hidden character is one `|! ` line holding its `_literal` instead."""
+    if any(_hidden(char) for char in text):
+        return [f"{indent}|! {_literal(text)}"]
+    return [f"{indent}|{' ' + line if line else ''}" for line in text.split("\n")]
+
+
+def _inline(text: str) -> str:
+    """Evidence on a line of its own, trimmed. Text that would span lines, holds a hidden character or starts
+    with `!` is shown as `!` and its `_literal`, untrimmed."""
+    shown = text.strip()
+    if "\n" in shown or shown.startswith("!") or any(_hidden(char) for char in shown):
+        return "!" + _literal(text)
+    return shown
+
+
+def _column(label: str, target: str, value: dict) -> list[str]:
+    """One typed alternative under its label, exactly as a ruling for it would record it."""
+    if target in ("policy", "interface"):
+        return [f"{label}:", *_block(value[target])]
+    return [f"{label}:", "  interface:", *_block(value["interface"], "  "), "  policy:", *_block(value["policy"], "  ")]
+
+
+def _source_lines(source: dict, labels: dict, agreed: str, withdrawn: Sequence[dict] = ()) -> list[str]:
+    """One source as the seats recorded it: each position under the seat that holds it, with its reason; a
+    disputed source's witness under the seat that wrote it, with its citation; and each withdrawal of it."""
+    owner = source["owner"]
+    reviewer = "challenger" if owner == "builder" else "builder"
+    lines = [f"- {source['key']}: {_inline(source['question'])}"]
+    if source["agree"]:
+        lines.append(f"  {labels[owner]}, {agreed}: {_inline(source['answer'])}")
+        if source["why"].strip():
+            lines.append(f"    why: {_inline(source['why'])}")
+    else:
+        for role, text, why in ((owner, source["answer"], source["why"]),
+                                (reviewer, source["counter"], source["counter_why"])):
+            lines.append(f"  {labels[role]}: {_inline(text)}")
+            if why.strip():
+                lines.append(f"    why: {_inline(why)}")
+        witness = source["witness"]
+        if witness:
+            lines.append(f"  witness from {labels[witness['author']]}: {_inline(witness['scenario'])} "
+                         f"({_inline(witness['observation'])}): {labels['builder']} {_inline(witness['a'])}; "
+                         f"{labels['challenger']} {_inline(witness['b'])}")
+            if witness["decided_by"]:
+                lines.append(f"    decided by: {_inline(witness['decided_by'])}")
+    lines += [f"  withdrawn by {labels[w['role']]}, now in {', '.join(w['destinations'])}: {_inline(w['reason'])}"
+              for w in withdrawn if w["source"] == source["key"]]
+    return lines
+
+
+def _first_vote(reply: dict, slot: str) -> dict | None:
+    return next((vote for vote in reply.get("votes", []) if vote["slot"] == slot), None)
+
+
+def card_text(row: dict, packet: dict, record: dict, proposal: dict, review: dict) -> str:
+    """The card for a public row of a settlement, as its card file, the CLI and the journal show it.
+
+    Every member source shows each seat's position and reason and its original witness; an agreed one
+    shows its owner and how its agreement stands. A pending row adds both columns verbatim, each seat's
+    vote and reason (reviewed modes), each withdrawal and the predictions both seats confirmed. A refusal
+    shows every replaced source by key, the reasons, each surviving term by key and verbatim, what the
+    one replacement covers, and its form. Every value is already `public`, so the card is not scrubbed
+    again: a scrub of the whole text could rewrite a `_literal`'s escapes.
+    """
+    labels = {role: f"{packet['seats'][role]} ({role})" for role in ("builder", "challenger")}
+    sources = {source["key"]: source for source in packet["sources"]}
+    lines = [f"Dispute {row['id']} ({row['kind']})", "", _inline(row["question"]), ""]
+    if row["kind"] == "refusal":
+        lines += ["The seats did not settle these terms. Replace all of them with one ruling, or drop the task.",
+                  "", "Reasons:", _inline(record["refusal_reason"]) or "none given", "", "Replaced by the ruling:"]
+        for key in row["members"]:
+            lines += _source_lines(sources[key], labels, "agreed by both seats, superseded")
+        lines += ["", "Kept as written:"]
+        for term in record["common"]:
+            lines += [f"- {', '.join(term['sources'])}:", "  question:", *_block(term["question"], "  "),
+                      "  text:", *_block(term["text"], "  ")]
+        if not record["common"]:
+            lines.append("- nothing")
+        lines += ["", f"The ruling covers: {', '.join(row['members'])}", _OTHER[row["target"]], "drop) Drop this task.",
+                  "", f"parallax rule {row['id']} other --note TEXT"]
+    else:
+        lines += [*_column(f"a) {labels['builder']}", row["target"], row["a"]),
+                  *_column(f"b) {labels['challenger']}", row["target"], row["b"]), _OTHER[row["target"]]]
+        votes = [(role, _first_vote(reply, row["slot"])) for role, reply in (("builder", proposal), ("challenger", review))]
+        if any(vote for _, vote in votes):
+            lines += ["", "Votes:"]
+            lines += [f"- {labels[role]} signs {', '.join(vote['sign'])}: {_inline(vote['reason'])}"
+                      for role, vote in votes if vote]
+        lines += ["", "Sources:"]
+        for key in row["members"]:
+            lines += _source_lines(sources[key], labels, "originally agreed by both seats", record["withdrawn"])
+        if row["witnesses"] and proposal:          # a direct row's witness is its source's, shown above
+            lines += ["", "Predictions both seats confirmed:"]
+            lines += [f"- {w['source']}: {_inline(w['scenario'])} ({_inline(w['observation'])}): "
+                      f"a) {_inline(w['a'])} b) {_inline(w['b'])}" for w in row["witnesses"]]
+        lines += ["", f"parallax rule {row['id']} a"]
+    return "\n".join(lines) + "\n"

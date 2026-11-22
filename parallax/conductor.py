@@ -21,7 +21,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from parallax import audit, batch, briefs, decisions, delivery, folders, gitops, receipt, redact, schemas, scopes
+from parallax import audit, batch, briefs, decisions, delivery, folders, gitops, receipt, schemas, scopes
 from parallax.config import Config, repo_key, state_home
 from parallax.crossing import cross, validate_mutants
 from parallax.decisions import Dispute, Point
@@ -47,6 +47,7 @@ class Outcome:
     detail: str = ""
     disputes: tuple[Dispute, ...] = ()
     commit: str | None = None
+    cards: tuple[dict, ...] = ()     # a confirmed-v1 settlement's pending public rows (Task 19.5)
 
 
 class _Stop(Exception):
@@ -193,7 +194,7 @@ def _reveal_problem(role: str, reveal: dict, readings: dict, keys: list[str]) ->
     """Why a recorded reveal cannot enter a confirmed-v1 settlement, or None.
 
     The witness, interface and conflict checks run on the recorded words, then on the words the
-    packet will show (scrubbed), so a distinction lost to scrubbing is caught before any call.
+    packet will show (`batch.public`), so a distinction lost to scrubbing is caught before any call.
     """
     problems = validate(reveal, schemas.REVEAL_CONFIRMED)
     if problems:
@@ -206,7 +207,7 @@ def _reveal_problem(role: str, reveal: dict, readings: dict, keys: list[str]) ->
     raw = _reveal_lines(role, reveal, readings, keys)
     if raw:
         return raw
-    shown = _reveal_lines(role, redact.scrub_values(reveal), redact.scrub_values(readings), keys)
+    shown = _reveal_lines(role, batch.public(reveal), batch.public(readings), keys)
     return f"after scrubbing: {shown}" if shown else None
 
 
@@ -265,6 +266,112 @@ def _batch_mismatch(t: _Task, event: dict) -> str | None:
     return None
 
 
+_SETTLEMENT_FIELDS = ("batch_protocol", "interface_protocol", "mode", "packet_sha", "proposal_sha", "review_sha",
+                      "direct_packet", "common", "withdrawn", "proposal", "review", "choices", "refusal_reason",
+                      "affected", "detail")
+_CERTIFICATE_FIELDS = ("packet_sha", "proposal_sha", "review_sha", "direct_packet", "proposal", "review")
+_PACKET_FIELDS = ("task", "seats", "precedents", "inputs", "sources", "challenger_interface", "predicted_failures",
+                  "conflicts", "reveals")
+_CARD_KIND = {"policy": "reading", "interface": "interface", "combined": "interface"}
+
+
+def _public_readings(packet: dict) -> dict:
+    """Both sealed readings as the packet shows them, scrubbed: the packet holds every field a reading has."""
+    rows = packet["sources"]
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        raise ValueError("sources must be a list of rows")
+    interfaces = [row for row in rows if row.get("kind") == "interface"]
+    if len(interfaces) != 1:
+        raise ValueError(f"sources must hold one builder interface row, not {len(interfaces)}")
+    return {role: {"interface": interfaces[0]["answer"] if role == "builder" else packet["challenger_interface"],
+                   "decisions": [{"question": row["question"], "answer": row["answer"], "why": row["why"]}
+                                 for row in rows if row.get("kind") == "reading" and row.get("owner") == role],
+                   "predicted_failures": packet["predicted_failures"][role]}
+            for role in ("builder", "challenger")}
+
+
+def _packet_problem(packet: dict) -> str | None:
+    """Why a published packet is not the one `batch.packet` builds from its own readings and reveals, or None.
+
+    The packet holds both scrubbed readings whole and both reveals, so it is rebuilt from them, with its
+    pinned task text and precedents, and compared whole. Its seats and inputs are checked by the caller.
+    """
+    if set(packet) != set(_PACKET_FIELDS) or not isinstance(packet["task"], str):
+        return "has other fields"
+    if not _precedents_ok(packet["precedents"]):
+        return "has malformed precedents"
+    try:
+        readings = _public_readings(packet)
+        reveals = {role: packet["reveals"][role] for role in ("builder", "challenger")}
+        for role in ("builder", "challenger"):
+            problems = validate(readings[role], schemas.READING)
+            if problems:
+                return f"has a {role} reading that is not a valid reading: {'; '.join(problems)}"
+        keys = decisions.source_keys(readings)
+        for role in ("builder", "challenger"):
+            problem = _reveal_problem(role, reveals[role], readings, keys)
+            if problem:
+                return f"has a {role} reveal that is not a confirmed-v1 reveal: {problem}"
+        rebuilt = batch.packet(packet["task"], packet["precedents"], readings, reveals, packet["inputs"],
+                               packet["seats"])
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        return f"is not well formed: {exc}"
+    if batch.canonical(rebuilt) != batch.canonical(packet):
+        return "does not follow from its own readings and reveals"
+    return None
+
+
+def _final_rows(t: _Task, record: dict, packet: dict, certificate: dict) -> list[dict]:
+    """The settlement's choices as published. Only public rows (pending or refused) get an ID, in slot order
+    from D-<task>-1, their allowed commands and their card text."""
+    rows, number = [], 0
+    for choice in record["choices"]:
+        refused = choice["resolution"] == "refused"
+        row = {"slot": choice["slot"], "target": choice["target"],
+               "kind": "refusal" if refused else _CARD_KIND[choice["target"]], "question": choice["question"],
+               "members": list(choice["members"]), "a": choice["a"], "b": choice["b"], "witnesses": choice["witnesses"],
+               "resolution": choice["resolution"], "selected": choice["selected"], "id": "", "allowed": [],
+               "card_text": ""}
+        if choice["resolution"] in ("pending", "refused"):
+            number += 1
+            row["id"] = f"D-{t.id}-{number}"
+            row["allowed"] = ["other", "drop"] if refused else ["a", "b", "other"]
+            row["card_text"] = batch.card_text(row, packet, record, certificate["proposal"], certificate["review"])
+            try:
+                row["card_text"].encode("utf-8")              # a card file is UTF-8; say which, never the text
+            except UnicodeEncodeError:
+                raise ValueError(f"the card for {choice['slot']} is not UTF-8 text") from None
+        rows.append(row)
+    return rows
+
+
+def _settlement_body(t: _Task, record: dict, packet: dict, certificate: dict) -> dict:
+    """The fields of the task's `reading.settled`, ending with `settlement_sha`: the digest of the rest and the task."""
+    body = {"batch_protocol": _BATCH_PROTOCOL, "interface_protocol": "whole", "mode": record["mode"],
+            "packet_sha": certificate["packet_sha"], "proposal_sha": certificate["proposal_sha"],
+            "review_sha": certificate["review_sha"], "direct_packet": certificate["direct_packet"],
+            "common": record["common"], "withdrawn": record["withdrawn"], "proposal": certificate["proposal"],
+            "review": certificate["review"], "choices": _final_rows(t, record, packet, certificate),
+            "refusal_reason": record["refusal_reason"], "affected": record["affected"], "detail": record["detail"]}
+    return {**body, "settlement_sha": batch.digest({"task": t.id, **body})}
+
+
+def _blocked_detail(settled: dict) -> str:
+    return (f"the confirmed settlement is blocked: {settled['detail']}; "
+            f"affected: {', '.join(settled['affected']) or 'unknown'}")
+
+
+def _reference_problem(seat: str, sealed: dict | None, done: dict | None) -> str | None:
+    """Task 19.4's per-seat checks of a seat's effective seal and reveal, which read only the events, or None."""
+    if sealed is not None and not _sha_ok(sealed.get("sha")):
+        return f"{seat}'s reading.sealed has no sha"
+    if done is not None and not _sha_ok(done.get("sha")):
+        return f"{seat}'s reveal.done has no sha"
+    if done is not None and done.get("batch_protocol") != _BATCH_PROTOCOL:
+        return f"{seat}'s reveal.done is not marked batch_protocol {_BATCH_PROTOCOL}"
+    return None
+
+
 class Conductor:
     cfg: Config
 
@@ -312,6 +419,18 @@ class Conductor:
         opened = [e for e in events if e["type"] == "dispute.opened" and e.get("id") == dispute_id]
         if not opened:
             raise ValueError(f"unknown dispute {dispute_id}")
+        task_opened = self._first(opened[-1]["task"], "task.opened") or {}
+        if task_opened.get("batch_protocol") == _BATCH_PROTOCOL:
+            # Task 19.5: no legacy ruling on a confirmed-v1 task; its cards are its settlement's, which 19.6 rules.
+            # A standalone card is refused with what run and status report first (a standalone reading or
+            # interface card is itself such a problem), or else as standalone.
+            try:
+                t = self._task_of(opened[-1]["task"], "", task_opened)
+                self._check_protocol(t)
+                self._published(t)
+            except _Stop as stop:
+                raise ValueError(stop.outcome.detail) from None
+            raise ValueError(f"{dispute_id} is a standalone {opened[-1].get('kind')} card on a {_BATCH_PROTOCOL} task")
         if any(e["type"] == "ruling.made" and e.get("dispute") == dispute_id for e in events):
             raise ValueError(f"{dispute_id} is already ruled")
         dispute = Dispute.from_event(opened[-1])
@@ -345,8 +464,10 @@ class Conductor:
         return events if task is None else [e for e in events if e.get("task") == task]
 
     def status(self) -> list[dict]:
-        events = self.events()
-        live = {e.get("task") for e in self.journal.events()}
+        text = gitops.show_file(self.cfg.root, self.cfg.main, LEDGER)
+        journal = self.journal.events()                     # one reading of the journal for every row (Task 19.5)
+        events = (parse_lines(text) if text else []) + journal
+        live = {e.get("task") for e in journal}
         order: list[str] = []
         for event in events:
             if event.get("task") not in order:
@@ -355,18 +476,40 @@ class Conductor:
         for task in order:
             mine = [e for e in events if e.get("task") == task]
             if task in live:
-                pending = [d.id for d in self._pending(mine)]
-                if mine[-1]["type"] == "task.parked":
-                    status = "parked"
-                elif pending:
-                    status = "needs_ruling"
-                else:
-                    status = "in_progress"
+                rows.append(self._live_row(task, mine))
             else:
-                pending = []
                 status = "dropped" if any(e["type"] == "task.dropped" for e in mine) else "landed"
-            rows.append({"task": task, "status": status, "pending": pending})
+                rows.append({"task": task, "status": status, "pending": []})
         return rows
+
+    def _live_row(self, task: str, mine: list[dict]) -> dict:
+        """A live task's status row, after the checks `run` makes before it exposes an ID (Task 19.5).
+
+        A row that fails them, or a blocked settlement, is `blocked` with no pending IDs, its detail, and the
+        settlement's affected keys (none for a failed check). Every check reads `mine`: one reading of the journal.
+        """
+        opened = next((e for e in mine if e["type"] == "task.opened"), None)
+        try:
+            t = None if opened is None else self._task_of(task, "", opened)
+            if t is not None:
+                self._check_protocol(t, mine)
+            if t is not None and t.batch:
+                published = self._published(t, mine)
+                if published is not None and published[0]["mode"] == "blocked":
+                    return {"task": task, "status": "blocked", "pending": [], "detail": _blocked_detail(published[0]),
+                            "affected": list(published[0]["affected"])}
+                pending = [row["id"] for row in published[1]] if published else []
+            else:
+                pending = [d.id for d in self._pending(mine)]
+        except _Stop as stop:
+            return {"task": task, "status": "blocked", "pending": [], "detail": stop.outcome.detail, "affected": []}
+        if mine[-1]["type"] == "task.parked":
+            status = "parked"
+        elif pending:
+            status = "needs_ruling"
+        else:
+            status = "in_progress"
+        return {"task": task, "status": status, "pending": pending}
 
     # ---------------------------------------------------------------- the run
 
@@ -382,13 +525,15 @@ class Conductor:
         t = self._open(task, text, builder, check_protocol=True)
         if t.kind == "chore":
             return self._solo(t)
-        self._readings(t)
-        self._reveal(t)
-        if t.batch:
-            # Task 19.4 records confirmed reveals. Publishing their settlement is Task 19.5's.
-            return Outcome("stopped", t.id, "stopped after the confirmed reveals")
+        if not t.batch or self._published(t) is None:
+            # A published confirmed-v1 settlement is checked from the journal alone, before any private artifact.
+            self._readings(t)
+            self._reveal(t)
         self._settle(t)
         self._rulings(t)
+        if t.batch:
+            # Task 19.5 publishes the settlement and its cards. Freezing a contract from it is Task 19.6's.
+            return Outcome("stopped", t.id, "stopped after the confirmed settlement")
         self._contract(t)
         if stop_after == "contract":
             return Outcome("stopped", t.id, "stopped after the contract was frozen")
@@ -459,24 +604,31 @@ class Conductor:
                                          builder=builder, challenger=challenger, title=title or task,
                                          interface_protocol="whole", **marker)
             self.say(f"{task}: opened ({kind}); builder {builder}, challenger {challenger}")
-        problem = _opening_problem(opened)
-        if problem:
-            raise _Stop(Outcome("blocked", task, f"{task}'s task.opened {problem}"))
-        t = _Task(task, text, opened["kind"], opened["title"], opened["base"], opened["builder"],
-                  opened["challenger"], self.home / repo_key(self.cfg.root) / task,
-                  whole=opened.get("interface_protocol") == "whole",
-                  batch=opened.get("batch_protocol") == _BATCH_PROTOCOL)
+        t = self._task_of(task, text, opened)
         for seat in t.seats:
             if seat not in self.seats:
                 raise ValueError(f"no seat named {seat!r} was given to the conductor")
         if check_protocol:
             self._check_protocol(t)                         # both kinds, before any state exists
+            if t.batch and self._published(t) is not None:
+                # Task 19.5: a published settlement and its rulings are checked; what follows needs no private state.
+                return t
         if not t.dir.exists():
             folders.make_private(t.dir)
         for seat in (t.seats if t.kind == "behavior" else (t.builder,)):
             if self._clone_of(t, seat) is None:
                 self._new_clone(t, seat)
         return t
+
+    def _task_of(self, task: str, text: str, opened: dict) -> _Task:
+        """The task a recorded opening describes. Blocks on an opening this version cannot read; creates nothing."""
+        problem = _opening_problem(opened)
+        if problem:
+            raise _Stop(Outcome("blocked", task, f"{task}'s task.opened {problem}"))
+        return _Task(task, text, opened["kind"], opened["title"], opened["base"], opened["builder"],
+                     opened["challenger"], self.home / repo_key(self.cfg.root) / task,
+                     whole=opened.get("interface_protocol") == "whole",
+                     batch=opened.get("batch_protocol") == _BATCH_PROTOCOL)
 
     # Step 3
     def _readings(self, t: _Task) -> None:
@@ -557,6 +709,9 @@ class Conductor:
 
     # Step 5
     def _settle(self, t: _Task) -> None:
+        if t.batch:
+            self._publish(t)
+            return
         readings = {seat: self._reading(t, seat) for seat in t.seats}
         reveals = self._reveals(t)
         _, _, disputes = decisions.settle(t.id, t.builder, t.challenger, readings, reveals)
@@ -565,7 +720,172 @@ class Conductor:
             if dispute.id not in opened:
                 self._open_dispute(t, dispute)
 
-    # Step 5b (Task 19.3): not yet reached by run
+    # Step 5, confirmed-v1 (Task 19.5)
+    def _publish(self, t: _Task) -> None:
+        """The task's confirmed-v1 settlement, published once, and its card files.
+
+        A published settlement is validated with its rulings from the journal and reused. Otherwise `_certified`
+        settles, replay's own checks accept the record, and one `reading.settled` append publishes it. Only then
+        is a card file, a view of its row, rewritten when missing or different. A blocked settlement stops the
+        run with its detail and affected keys.
+        """
+        published = self._published(t)
+        if published is None:
+            record, packet, certificate = self._certified(t)
+            try:
+                body = _settlement_body(t, record, packet, certificate)
+            except ValueError as exc:                       # a card no file can hold
+                raise _Stop(Outcome("blocked", t.id, f"the confirmed settlement cannot be published: {exc}")) from None
+            # Publish only what every later reader accepts: the same checks, on the journal as it would be.
+            self._settlement(t, self.events(t.id) + [{"type": "reading.settled", "task": t.id, **body}])
+            self.journal.append("reading.settled", t.id, **body)
+            published = self._published(t)
+            self.say(f"{t.id}: settlement published ({published[0]['mode']})")
+        settled = published[0]
+        for row in settled["choices"]:
+            if row["id"]:
+                path = self._run_dir(t) / "cards" / f"{row['id']}.md"
+                if not path.is_file() or path.read_bytes() != row["card_text"].encode("utf-8"):
+                    self._write(path, row["card_text"])
+        if settled["mode"] == "blocked":
+            raise _Stop(Outcome("blocked", t.id, _blocked_detail(settled)))
+
+    def _published(self, t: _Task, events: list[dict] | None = None) -> tuple[dict, list[dict]] | None:
+        """The validated settlement and its public rows without a ruling, from one reading of the journal, or None.
+
+        Run checks it before any private state, call or append, and before it writes a card; status checks it
+        the same way and writes nothing. A ruling must come after the settlement, rule one of its public IDs,
+        carry the marker and its settlement_sha, and be the only one for that ID. Checking its choice, value
+        and scope is Task 19.6's, with writing one.
+        """
+        events = self.events(t.id) if events is None else events
+        settled = self._settlement(t, events)
+        public = [row["id"] for row in settled["choices"] if row["id"]] if settled else []
+        ruled, after = set(), False
+        for e in events:
+            after = after or e["type"] == "reading.settled"
+            if e["type"] != "ruling.made":
+                continue
+            name = e.get("dispute")
+            if not after:
+                raise _Stop(Outcome("blocked", t.id, f"{name}'s ruling.made comes before the reading.settled record"))
+            if name not in public:
+                raise _Stop(Outcome("blocked", t.id, f"{name}'s ruling.made rules no card of the reading.settled record"))
+            if e.get("batch_protocol") != _BATCH_PROTOCOL or e.get("settlement_sha") != settled["settlement_sha"]:
+                raise _Stop(Outcome("blocked", t.id, f"{name}'s ruling.made is not bound to the reading.settled record"))
+            if name in ruled:
+                raise _Stop(Outcome("blocked", t.id, f"{name} has more than one ruling.made"))
+            ruled.add(name)
+        if settled is None:
+            return None
+        return settled, [row for row in settled["choices"] if row["id"] and row["id"] not in ruled]
+
+    def _settlement(self, t: _Task, events: list[dict]) -> dict | None:
+        """The task's published `reading.settled` in `events`, validated, or None before publication.
+
+        It reads no private artifact. The seals, reveals and checkpoints before it must be the ones the
+        publisher accepts, in its order and by its seats; the packet must rebuild from its own evidence;
+        the certificate the record copies must match its checkpoints and pass its checks; and the whole
+        record must follow from it.
+        """
+        found = [i for i, e in enumerate(events) if e["type"] == "reading.settled"]
+        if not found:
+            return None
+        if len(found) > 1:
+            raise _Stop(Outcome("blocked", t.id, f"{t.id} has {len(found)} reading.settled records"))
+        at = found[0]
+        settled = events[at]
+
+        def blocked(problem: str) -> _Stop:
+            return _Stop(Outcome("blocked", t.id, f"the reading.settled record {problem}"))
+
+        body = {k: v for k, v in settled.items() if k not in ("ts", "type", "task", "settlement_sha")}
+        if settled.get("settlement_sha") != batch.digest({"task": t.id, **body}):
+            raise blocked("does not match its settlement_sha")
+        if set(body) != set(_SETTLEMENT_FIELDS):
+            raise blocked("has other fields")
+        later = ("reading.sealed", "reveal.done", "batch.proposed", "batch.reviewed")
+        if any(e["type"] in later for e in events[at:]):
+            raise blocked("comes before a seal, reveal or batch checkpoint")
+        prefix = events[:at]
+        seals, reveals_done = self._marked_events(t, prefix, pair=True)          # 19.4's checks and diagnostics
+        for seat in t.seats:
+            problem = _reference_problem(seat, seals[seat][1], reveals_done[seat][1])
+            if problem:
+                raise _Stop(Outcome("blocked", t.id, problem))
+        inputs ={t.role(s): {"reading": seals[s][1]["sha"], "reveal": reveals_done[s][1]["sha"]} for s in t.seats}
+        proposed, reviewed = self._batch_checkpoints(t, prefix, max(i for i, _ in reveals_done.values()))
+        mode = body["mode"]
+        if mode == "direct":
+            if proposed is not None or reviewed is not None:
+                raise blocked("is direct, but the task has batch checkpoints")
+            if [body[f] for f in ("proposal_sha", "review_sha", "proposal", "review")] != ["", "", {}, {}]:
+                raise blocked("is direct, but names a proposal or review")
+            packet = body["direct_packet"]
+            if not isinstance(packet, dict) or batch.digest(packet) != body["packet_sha"]:
+                raise blocked("has a direct_packet that does not match its packet_sha")
+        elif mode in ("confirmed", "refusal", "blocked"):
+            if proposed is None or reviewed is None:
+                raise blocked(f"is {mode}, but the task has no batch.proposed and batch.reviewed")
+            if body["direct_packet"] != {}:
+                raise blocked(f"is {mode}, but carries a direct_packet")
+            # 19.3's checkpoint checks and diagnostics, from the journal alone.
+            for event, seat, role in ((proposed, t.builder, "builder"), (reviewed, t.challenger, "challenger")):
+                problem = _checkpoint_problem(event, seat, role)
+                if problem:
+                    raise _Stop(Outcome("blocked", t.id, f"the {event['type']} checkpoint {problem}"))
+            if proposed.get("opening") != _opening_sha(t):
+                raise _Stop(Outcome("blocked", t.id, "the batch.proposed checkpoint belongs to another opening"))
+            if reviewed["packet_sha"] != proposed["packet_sha"]:
+                raise _Stop(Outcome("blocked", t.id, "the batch.reviewed checkpoint names a different packet"))
+            if reviewed.get("proposal_sha") != proposed["sha"]:
+                raise _Stop(Outcome("blocked", t.id, "the batch.reviewed checkpoint names a different proposal"))
+            if proposed["packet_sha"] != body["packet_sha"]:
+                raise blocked("names a different packet than its checkpoints")
+            if proposed["sha"] != body["proposal_sha"]:
+                raise blocked("names a different proposal than its checkpoints")
+            if reviewed["sha"] != body["review_sha"]:
+                raise blocked("names a different review than its batch.reviewed checkpoint")
+            packet = proposed.get("packet")
+            if not isinstance(packet, dict) or batch.digest(packet) != body["packet_sha"]:
+                raise blocked("names a packet its batch.proposed checkpoint does not hold")
+        else:
+            raise blocked(f"has mode {mode!r}, which this version of parallax does not know")
+        if packet.get("seats") != {"builder": t.builder, "challenger": t.challenger} or packet.get("inputs") != inputs:
+            raise blocked("settles other seats or inputs than the recorded seals and reveals")
+        problem = _packet_problem(packet)
+        if problem:
+            raise blocked(f"holds a packet that {problem}")
+        route = _route(packet)
+        if route != ("direct" if mode == "direct" else "batch"):
+            raise blocked(f"is {mode}, but its packet is on a {route} route")
+        if mode != "direct":
+            for name, schema in (("proposal", schemas.PROPOSAL), ("review", schemas.REVIEW)):
+                if not isinstance(body[name], dict) or batch.digest(body[name]) != body[f"{name}_sha"]:
+                    raise blocked(f"holds a {name} that does not match its {name}_sha")
+                problems = validate(body[name], schema)
+                if problems:
+                    raise blocked(f"holds a {name} that does not match its schema: {'; '.join(problems)}")
+                if batch.canonical(body[name]) != batch.canonical(batch.accepted(body[name])):
+                    raise blocked(f"holds a {name} that is not its accepted value")
+            problem = (batch.proposal_problem(body["proposal"], packet, body["packet_sha"])
+                       or batch.review_problem(body["review"], body["proposal"], packet, body["packet_sha"],
+                                               body["proposal_sha"]))
+            if problem:
+                raise blocked(f"holds a certificate that no longer passes its checks: {problem}")
+        try:
+            if mode == "direct":
+                record = batch.direct_settlement(packet)
+            else:
+                record = batch.confirmed_settlement(packet, body["proposal"], body["review"])
+            expected = _settlement_body(t, record, packet, {field: body[field] for field in _CERTIFICATE_FIELDS})
+        except (ValueError, KeyError, TypeError, IndexError) as exc:
+            raise blocked(f"does not follow from its certificate: {exc}") from None
+        if batch.canonical(expected) != batch.canonical({**body, "settlement_sha": settled["settlement_sha"]}):
+            raise blocked("does not follow from its certificate")
+        return settled
+
+    # Step 5b (Task 19.3), reached by run through `_publish` (Task 19.5)
     def _confirm(self, t: _Task) -> dict:
         """Task 19.3: the settlement of the sealed readings and confirmed reveals. Publishes nothing.
 
@@ -573,6 +893,14 @@ class Conductor:
         challenger for a review, each read-only and checkpointed; a completed checkpoint is verified and
         reused, never asked again. Every way to stop is `_Stop` with a blocked outcome, and verifying
         never changes the journal or an artifact.
+        """
+        return self._certified(t)[0]
+
+    def _certified(self, t: _Task) -> tuple[dict, dict, dict]:
+        """`_confirm`'s settlement, the packet it settles, and the certificate Task 19.5 publishes with it.
+
+        The certificate is the packet's sha with either the direct packet, or the accepted proposal and review
+        and their shas, exactly as their checkpoints hold them.
         """
         events = self.events(t.id)
         readings, reveals, inputs, last_reveal = self._confirm_inputs(t, events)
@@ -582,9 +910,11 @@ class Conductor:
             packet = self._batch_packet(t, in_force, readings, reveals, inputs)
             if _route(packet) == "direct":
                 try:
-                    return batch.direct_settlement(packet)
+                    record = batch.direct_settlement(packet)
                 except ValueError as exc:
                     raise _Stop(Outcome("blocked", t.id, str(exc))) from None
+                return record, packet, {"packet_sha": batch.digest(packet), "proposal_sha": "", "review_sha": "",
+                                        "direct_packet": packet, "proposal": {}, "review": {}}
             proposal, proposed = self._propose(t, packet)
         else:
             packet, proposal = self._verified_proposal(t, proposed, readings, reveals, inputs)
@@ -592,7 +922,9 @@ class Conductor:
             review = self._review_proposal(t, packet, proposal, proposed)
         else:
             review = self._verified_review(t, reviewed, proposed, packet, proposal)
-        return batch.confirmed_settlement(packet, proposal, review)
+        return (batch.confirmed_settlement(packet, proposal, review), packet,
+                {"packet_sha": proposed["packet_sha"], "proposal_sha": proposed["sha"], "review_sha": batch.digest(review),
+                 "direct_packet": {}, "proposal": proposal, "review": review})
 
     def _confirm_inputs(self, t: _Task, events: list[dict]) -> tuple[dict, dict, dict, int]:
         """Both sealed readings and both confirmed reveals, by role, their shas, and where the later reveal is.
@@ -612,29 +944,14 @@ class Conductor:
         def blocked(detail: str) -> _Stop:
             return _Stop(Outcome("blocked", t.id, detail))
 
-        seals, reveals_done = {}, {}
-        for i, event in enumerate(events):
-            if event.get("seat") in t.seats and event["type"] == "reading.sealed":
-                seals[event["seat"]] = (i, event)
-            elif event.get("seat") in t.seats and event["type"] == "reveal.done":
-                reveals_done[event["seat"]] = (i, event)
-        for seat in t.seats:
-            if pair and (seat not in seals or seat not in reveals_done):
-                raise blocked(f"{seat} has no sealed reading and reveal to settle")
-            if reveals_done and seat not in seals:
-                raise blocked(f"{seat} has no sealed reading before the recorded reveals")
-        if reveals_done and max(i for i, _ in seals.values()) > min(i for i, _ in reveals_done.values()):
-            raise blocked("the recorded reveals do not follow both sealed readings")
+        seals, reveals_done = self._marked_events(t, events, pair=pair)
         readings, reveals, inputs = {}, {}, {}
         for seat in t.seats:
             sealed = seals[seat][1] if seat in seals else None
             done = reveals_done[seat][1] if seat in reveals_done else None
-            if sealed is not None and not _sha_ok(sealed.get("sha")):
-                raise blocked(f"{seat}'s reading.sealed has no sha")
-            if done is not None and not _sha_ok(done.get("sha")):
-                raise blocked(f"{seat}'s reveal.done has no sha")
-            if done is not None and done.get("batch_protocol") != _BATCH_PROTOCOL:
-                raise blocked(f"{seat}'s reveal.done is not marked batch_protocol {_BATCH_PROTOCOL}")
+            problem = _reference_problem(seat, sealed, done)  # per seat, just before its artifacts, as in 19.4
+            if problem:
+                raise blocked(problem)
             role = t.role(seat)
             if sealed is not None:
                 readings[role] = self._artifact(t, seat, "reading", sealed["sha"])
@@ -653,6 +970,30 @@ class Conductor:
                 if problem:
                     raise blocked(f"{seat}'s recorded reveal is not a confirmed-v1 reveal: {problem}")
         return readings, reveals, inputs, max((i for i, _ in reveals_done.values()), default=None)
+
+    def _marked_events(self, t: _Task, events: list[dict], *, pair: bool) -> tuple[dict, dict]:
+        """The part of `_marked_inputs` that reads only events (Task 19.5's replay reads it too).
+
+        Each seat's effective seal and reveal, by seat, as (index, event): present as `pair` requires and
+        both seals before both reveals. Each caller then checks each seat's with `_reference_problem`.
+        """
+        def blocked(detail: str) -> _Stop:
+            return _Stop(Outcome("blocked", t.id, detail))
+
+        seals, reveals_done = {}, {}
+        for i, event in enumerate(events):
+            if event.get("seat") in t.seats and event["type"] == "reading.sealed":
+                seals[event["seat"]] = (i, event)
+            elif event.get("seat") in t.seats and event["type"] == "reveal.done":
+                reveals_done[event["seat"]] = (i, event)
+        for seat in t.seats:
+            if pair and (seat not in seals or seat not in reveals_done):
+                raise blocked(f"{seat} has no sealed reading and reveal to settle")
+            if reveals_done and seat not in seals:
+                raise blocked(f"{seat} has no sealed reading before the recorded reveals")
+        if reveals_done and max(i for i, _ in seals.values()) > min(i for i, _ in reveals_done.values()):
+            raise blocked("the recorded reveals do not follow both sealed readings")
+        return seals, reveals_done
 
     def _artifact(self, t: _Task, seat: str, stage: str, sha: str):
         """`_stored`, with an artifact that is not JSON as a blocked outcome rather than an exception."""
@@ -784,6 +1125,13 @@ class Conductor:
 
     # Step 6
     def _rulings(self, t: _Task) -> None:
+        if t.batch:
+            settled, cards = self._published(t)
+            if cards:
+                ids = ", ".join(row["id"] for row in cards)
+                self.say(f"{t.id}: needs a ruling on {ids}")
+                raise _Stop(Outcome("needs_ruling", t.id, f"needs a ruling on {ids}", cards=tuple(cards)))
+            return
         pending = self._pending(self.events(t.id))
         if pending:
             ids = ", ".join(d.id for d in pending)
@@ -826,12 +1174,13 @@ class Conductor:
             raise _Stop(Outcome("blocked", t.id, self._mismatch(f"{t.challenger}'s recorded reveal", t.id, t.whole)))
         return reveals
 
-    def _check_protocol(self, t: _Task) -> None:
+    def _check_protocol(self, t: _Task, events: list[dict] | None = None) -> None:
         """Blocks on the first recorded event written under another protocol than the task's opening.
 
         Interface cards and frozen contracts carry the interface protocol; `_batch_mismatch` covers the batch protocol.
+        `events`, when given, is the task's events as the caller read them (status reads the journal once).
         """
-        for e in self.events(t.id):
+        for e in self.events(t.id) if events is None else events:
             problem = _batch_mismatch(t, e)
             if problem:
                 raise _Stop(Outcome("blocked", t.id, problem))
