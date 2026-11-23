@@ -639,6 +639,12 @@ class Restart(unittest.TestCase):
             c._confirm(t)
         bstub.script["reading"] = [lambda req: copy.deepcopy(ROLE_READINGS["builder"])]
         cstub.script["reading"] = [lambda req: copy.deepcopy(ROLE_READINGS["challenger"])]
+        # Task 19.9: clamp-002's reading takes the precedents, which are refused while another history holds
+        # confirmed-v1 records under an opening without the marker, as this module's fixture does. Mark it.
+        events = parse_lines(c.journal.path.read_text(encoding="utf-8"))
+        self.assertEqual((events[0]["type"], events[0]["task"]), ("task.opened", TASK))
+        events[0]["batch_protocol"] = "confirmed-v1"
+        c.journal.path.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8", newline="\n")
         t2 = c._open("clamp-002", t.text, "codex")
         c._readings(t2)
         record_reveals(c, t2, ROLE_REVEALS)

@@ -245,6 +245,9 @@ def _opening_problem(opened: dict) -> str | None:
         return f"has batch_protocol {_BATCH_PROTOCOL} without interface_protocol whole"
     if opened.get("kind") != "behavior":
         return f"has batch_protocol {_BATCH_PROTOCOL} on a {opened.get('kind')} task"
+    for field in ("title", "base", "builder", "challenger"):
+        if not isinstance(opened.get(field), str):
+            return f"has batch_protocol {_BATCH_PROTOCOL} and no {field}"     # Task 19.9: `_task_of` reads each
     return None
 
 
@@ -270,6 +273,40 @@ def _holds_card(event: dict, dispute_id: str) -> bool:
     """Whether `event` is a reading.settled record with a row whose ID is `dispute_id`, checked or not."""
     rows = event.get("choices") if event["type"] == "reading.settled" else None
     return isinstance(rows, list) and any(isinstance(row, dict) and row.get("id") == dispute_id for row in rows)
+
+
+def _batched(events: Sequence[dict]) -> bool:
+    """Whether any record says its task is confirmed-v1, whatever its opening says: the marker, or a batch record."""
+    return any("batch_protocol" in e or e.get("type") in _BATCH_RECORDS for e in events)
+
+
+def _once(ledger: list[dict], journal: list[dict]) -> tuple[list[dict], set]:
+    """The journal without each task main's ledger already holds record for record, and the tasks in both places
+    whose two copies differ (Task 19.9).
+
+    Landing publishes a task's journal records to the ledger, advances main, and only then forgets them. A run
+    that dies between the two leaves the same records in both places: they are one history, and the ledger's
+    copy is the one that counts. The copies are compared as canonical JSON, all of the task's records in order:
+    key order means nothing, and `true` is not `1`. A task whose copies differ is left in both.
+    """
+    held: dict = {}
+    for e in ledger:
+        held.setdefault(e.get("task"), []).append(e)
+    live: dict = {}
+    for e in journal:
+        live.setdefault(e.get("task"), []).append(e)
+    both = [task for task in live if task in held]
+    same = {task for task in both
+            if [batch.canonical(e) for e in held[task]] == [batch.canonical(e) for e in live[task]]}
+    return [e for e in journal if e.get("task") not in same], set(both) - same
+
+
+def _two_copies(task: str) -> str:
+    return f"{task} has different ledger and journal records"
+
+
+def _unopened(task: str) -> str:
+    return f"{task} has {_BATCH_PROTOCOL} records and no task.opened"
 
 
 _CROSSING_KINDS = ("check", "mutant", "unresolved")
@@ -506,6 +543,7 @@ class Conductor:
             # There the only standalone card those checks pass is one the crossing before it opens (Task 19.8),
             # and it is ruled as on any task.
             try:
+                self._one_history(opened[-1]["task"])
                 t = self._task_of(opened[-1]["task"], "", task_opened)
                 self._check_protocol(t)
                 if t.batch:
@@ -524,8 +562,12 @@ class Conductor:
             text = note.strip() or "Drop this task."
         else:
             text = decisions.ruling_text(dispute, choice, note)
+        # Task 19.9: on a confirmed-v1 task the mutant is the one that task's own crossing reserved the ID for,
+        # which is what its readers check. Another task's crossing record cannot name it.
+        own = task_opened is not None and t.batch
+        mutant_of = self._mutant_of([e for e in events if e.get("task") == t.id] if own else events)
         if dispute.kind == "mutant" and choice == "b":
-            mutant = self._mutant_of(events).get(dispute_id, "?")
+            mutant = mutant_of.get(dispute_id, "?")
             waiver = f"mutant {mutant} waived" + (f": {note.strip()}" if note.strip() else "")
             limitation = f"{waiver}; {limitation}" if limitation.strip() else waiver
         if dispute.kind in ("mutant", "unresolved"):
@@ -538,7 +580,7 @@ class Conductor:
                   "text": text, "scope": scope, "while": while_, "limitation": limitation}
         if task_opened is not None and t.batch:
             # Task 19.8: what every reader will require of this ruling is required before it is written.
-            problem = _crossing_ruling_problem(opened[-1], fields, self._mutant_of(events).get(dispute_id))
+            problem = _crossing_ruling_problem(opened[-1], fields, mutant_of.get(dispute_id))
             if problem:
                 raise ValueError(f"{dispute_id}'s ruling {problem}")
         self.journal.append("ruling.made", opened[-1]["task"], **fields)
@@ -554,6 +596,7 @@ class Conductor:
         if opened is None:
             raise ValueError(f"{task}'s reading.settled has no task.opened")
         try:
+            self._one_history(task)
             t = self._task_of(task, "", opened)
             self._check_protocol(t)
             settled, cards = self._published(t)
@@ -564,16 +607,33 @@ class Conductor:
             raise ValueError(f"{dispute_id} is already ruled")
         self.journal.append("ruling.made", task, **batch.ruling(settled, row, choice, note, scope, while_, limitation))
 
-    def events(self, task: str | None = None) -> list[dict]:
-        """The ledger as committed on main, followed by the journal."""
+    def _stores(self) -> tuple[list[dict], list[dict], set]:
+        """The ledger as committed on main; the journal, without each task the ledger holds record for record;
+        and the tasks whose ledger and journal copies differ (Task 19.9, `_once`)."""
         text = gitops.show_file(self.cfg.root, self.cfg.main, LEDGER)
-        events = (parse_lines(text) if text else []) + self.journal.events()
+        ledger = parse_lines(text) if text else []
+        journal, differing = _once(ledger, self.journal.events())
+        return ledger, journal, differing
+
+    def events(self, task: str | None = None) -> list[dict]:
+        """The ledger as committed on main, followed by the journal, each task counted once (`_stores`)."""
+        ledger, journal, _ = self._stores()
+        events = ledger + journal
         return events if task is None else [e for e in events if e.get("task") == task]
 
+    def _one_history(self, task: str) -> None:
+        """Blocks when main's ledger and the journal hold different records of a confirmed-v1 task (Task 19.9).
+
+        Read together they can pass for one history (a whole ledger copy and a journal copy cut to its opening),
+        and the cleanup would then forget the journal's. A task from before the marker is read as before.
+        """
+        ledger, journal, differing = self._stores()
+        if task in differing and _batched([e for e in ledger + journal if e.get("task") == task]):
+            raise _Stop(Outcome("blocked", task, _two_copies(task)))
+
     def status(self) -> list[dict]:
-        text = gitops.show_file(self.cfg.root, self.cfg.main, LEDGER)
-        journal = self.journal.events()                     # one reading of the journal for every row (Task 19.5)
-        events = (parse_lines(text) if text else []) + journal
+        ledger, journal, differing = self._stores()         # one reading of the journal for every row (Task 19.5)
+        events = ledger + journal
         live = {e.get("task") for e in journal}
         order: list[str] = []
         for event in events:
@@ -582,6 +642,10 @@ class Conductor:
         rows = []
         for task in order:
             mine = [e for e in events if e.get("task") == task]
+            if task in differing and _batched(mine):
+                rows.append({"task": task, "status": "blocked", "pending": [], "detail": _two_copies(task),
+                             "affected": []})
+                continue
             if task in live:
                 rows.append(self._live_row(task, mine))
             else:
@@ -604,10 +668,42 @@ class Conductor:
         """
         opened = next((e for e in mine if e["type"] == "task.opened"), None)
         if opened is None or "batch_protocol" not in opened:
-            return
+            if not _batched(mine):
+                return
+            # Task 19.9: confirmed-v1 records outlive a lost opening or a lost marker, and are not read as older.
+            if opened is None:
+                raise _Stop(Outcome("blocked", task, _unopened(task)))
         t = self._task_of(task, "", opened)
-        self._check_protocol(t, mine)
+        self._check_protocol(t, mine)                       # an opening without the marker stops here
         self._published(t, mine)
+
+    def _precedents(self, t: _Task, landing: bool = False) -> list[dict]:
+        """Every precedent, numbered in the order ruled, for `t` to read, pin, freeze or land (Task 19.9).
+
+        A ruling is a precedent only in a history that still reads as its writer left it, so every other task
+        with confirmed-v1 records, landed or live, is checked first as `status` checks it. Every one, not only those
+        with a ruling scoped to the project: a history that lost such a ruling would renumber the ones after it.
+
+        `landing` numbers them as every reader will once this landing advances main: `t`'s records move from
+        the journal to the end of the ledger, ahead of the tasks still live.
+        """
+        ledger, journal, differing = self._stores()
+        tasks: dict = {}
+        for e in ledger + journal:
+            tasks.setdefault(e.get("task"), []).append(e)
+        for task, mine in tasks.items():
+            if task == t.id:
+                continue                                    # its own run checks it, before any precedent is read
+            try:
+                if task in differing and _batched(mine):
+                    raise _Stop(Outcome("blocked", task, _two_copies(task)))
+                self._landed_check(task, mine)
+            except _Stop as stop:
+                raise _Stop(Outcome("blocked", t.id, f"{task}'s rulings cannot be precedents: "
+                                                     f"{stop.outcome.detail}")) from None
+        if landing:
+            journal = [e for e in journal if e.get("task") == t.id] + [e for e in journal if e.get("task") != t.id]
+        return decisions.precedents(ledger + journal)
 
     def _live_row(self, task: str, mine: list[dict]) -> dict:
         """A live task's status row, after the checks `run` makes before it exposes an ID (Task 19.5).
@@ -617,6 +713,8 @@ class Conductor:
         """
         opened = next((e for e in mine if e["type"] == "task.opened"), None)
         try:
+            if opened is None and _batched(mine):
+                raise _Stop(Outcome("blocked", task, _unopened(task)))      # Task 19.9, as `_landed_check`
             t = None if opened is None else self._task_of(task, "", opened)
             if t is not None:
                 self._check_protocol(t, mine)
@@ -655,6 +753,7 @@ class Conductor:
                 return Outcome("dropped", task, f"{task} was already dropped")
             if "task.integrated" in ended:
                 return Outcome("landed", task, f"{task} has already landed")
+        self._one_history(task)
         t = self._open(task, text, builder, check_protocol=True)
         if t.kind == "chore":
             return self._solo(t)
@@ -776,7 +875,7 @@ class Conductor:
         self._parallel([lambda seat=seat: self._read(t, seat) for seat in todo])
 
     def _read(self, t: _Task, seat: str) -> None:
-        brief = briefs.reading(t.text, t.role(seat), self.cfg, decisions.precedents(self.events()), whole=t.whole)
+        brief = briefs.reading(t.text, t.role(seat), self.cfg, self._precedents(t), whole=t.whole)
         request = SeatRequest("reading", brief, self._clone_of(t, seat), schemas.READING, writable=False,
                               session=None, out_dir=self._artifact_dir(t, seat, "reading"))
         voids = []
@@ -1124,7 +1223,7 @@ class Conductor:
         readings, reveals, inputs, last_reveal = self._confirm_inputs(t, events)
         proposed, reviewed = self._batch_checkpoints(t, events, last_reveal)
         if proposed is None:
-            in_force = [p for p in decisions.precedents(self.events()) if p["task"] != t.id]
+            in_force = [p for p in self._precedents(t) if p["task"] != t.id]
             packet = self._batch_packet(t, in_force, readings, reveals, inputs)
             if _route(packet) == "direct":
                 try:
@@ -1456,7 +1555,7 @@ class Conductor:
 
     def _freeze(self, t: _Task, version: int, interface: str, points: Sequence[Point]) -> None:
         # This task's own rulings are already decisions in the contract.
-        in_force = [p for p in decisions.precedents(self.events()) if p["task"] != t.id]
+        in_force = [p for p in self._precedents(t) if p["task"] != t.id]
         text = decisions.render_contract(t.id, version, t.text, interface, points, in_force)
         self._write(self._run_dir(t) / f"contract-v{version}.md", text)
         marker = {"interface_protocol": "whole"} if t.whole else {}
@@ -2032,7 +2131,7 @@ class Conductor:
             for rel, text in files.items():
                 self._write(land / rel, text)
             self._write(land / ".parallax" / "PRECEDENTS.md",
-                        decisions.render_precedents(decisions.precedents(self.events())))
+                        decisions.render_precedents(self._precedents(t, landing=True)))
             gitops.git(land, "add", "-A")
             if declared is not None:
                 allowed = {*declared, LEDGER, ".parallax/PRECEDENTS.md", *files}
