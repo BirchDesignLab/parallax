@@ -26,9 +26,44 @@ def windows_sandbox_setting(codex_home: Path) -> str | None:
     return setting if isinstance(setting, str) else None
 
 
-def _event_metadata(events: str) -> tuple[str | None, dict, bool]:
+def _spent(store: Path, session: str | None, total: dict | None) -> dict:
+    """What one call spent, given the thread's running `total` from its `turn.completed`.
+
+    Codex reports usage per thread, not per call: a resumed call's figures include every
+    call before it (live runs, 2026-11-23). The last total seen for each thread is kept in
+    `store`, beside the calls' artifact folders, so the difference survives a restart.
+    A call with no `turn.completed` reports nothing and its spend lands on the next call.
+    With no usable record the whole total is reported.
+    """
+    if total is None:
+        return {"input": 0, "cached": 0, "output": 0}
+    if session is None:
+        return total
+    try:
+        seen = json.loads(store.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        seen = {}
+    if not isinstance(seen, dict):
+        seen = {}
+    before = seen.get(session)
+    if not isinstance(before, dict):
+        before = {}
+    spent = {}
+    for key, now in total.items():
+        was = before.get(key, 0)
+        spent[key] = now - was if type(was) is int and 0 <= was <= now else now
+    seen[session] = total
+    try:
+        store.write_text(json.dumps(seen), encoding="utf-8", newline="\n")
+    except OSError:
+        pass                      # bookkeeping only: the next call then reports more than its share
+    return spent
+
+
+def _event_metadata(events: str) -> tuple[str | None, dict | None, bool]:
+    """The thread id, the thread's running usage total (None without a `turn.completed`), and whether a thread started."""
     session = None
-    usage = {"input": 0, "cached": 0, "output": 0}
+    usage = None
     started = False
     for line in events.splitlines():
         try:
@@ -45,7 +80,7 @@ def _event_metadata(events: str) -> tuple[str | None, dict, bool]:
             tokens = event.get("usage")
             if not isinstance(tokens, dict):
                 tokens = {}
-            usage = {key: tokens.get(field, 0) for key, field in (
+            usage = {key: value if type(value := tokens.get(field, 0)) is int else 0 for key, field in (
                 ("input", "input_tokens"), ("cached", "cached_input_tokens"),
                 ("output", "output_tokens"))}
     return session, usage, started
@@ -101,7 +136,8 @@ class CodexSeat:
                                      input=req.brief, env=seat_env("codex"))
                 events += result.output
                 (req.out_dir / "events.jsonl").write_text(events, encoding="utf-8", newline="\n")
-                session, usage, started = _event_metadata(result.output)
+                session, total, started = _event_metadata(result.output)
+                usage = _spent(req.out_dir.parent / "codex-usage.json", session, total)
                 if result.timed_out:
                     return SeatResult(None, session, events, usage,
                                       f"timed out after {self.cfg.seat_timeout}s")

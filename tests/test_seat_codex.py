@@ -55,6 +55,21 @@ class Codex(unittest.TestCase):
         self.assertNotIn("--sandbox", argv); self.assertNotIn("-C", argv)
         self.assertEqual(argv[-2:], ["abc-123", "-"])
 
+    def test_a_resumed_call_reports_only_what_it_spent(self):
+        # Codex's turn.completed carries the thread's running total (live runs, 2026-11-23).
+        first = self.seat.run(self.request())
+        again = CodexSeat(self.cfg.seats[0], self.cfg, launcher=FAKE, codex_home=self.home)    # a new process: nothing in memory
+        second = again.run(SeatRequest("probe", "the brief", self.cwd, PROBE, True, first.session, self.tmp / "out dir 2"))
+        third = again.run(SeatRequest("probe", "the brief", self.cwd, PROBE, True, first.session, self.tmp / "out dir 2"))
+        for result in (first, second, third):
+            self.assertEqual(result.usage, {"input": 31830, "cached": 15488, "output": 295})
+        os.environ["FAKE_CODEX_MODE"] = "always_fails"                          # a call that dies reports nothing...
+        self.assertEqual(again.run(self.request(session=first.session)).usage, {"input": 0, "cached": 0, "output": 0})
+        os.environ["FAKE_CODEX_MODE"] = "ok"                                    # ...so its two launches land on the next call
+        self.assertEqual(again.run(self.request(session=first.session)).usage, {"input": 95490, "cached": 46464, "output": 885})
+        (self.tmp / "codex-usage.json").write_text("{not json", encoding="utf-8")
+        self.assertEqual(again.run(self.request(session=first.session)).usage["output"], 295 * 7)   # no usable record: the total, never a guess
+
     def test_sandbox_setting_is_omitted_when_the_human_has_none(self):
         (self.home / "config.toml").write_text('model = "x"\n', encoding="utf-8")
         self.assertIsNone(windows_sandbox_setting(self.home))

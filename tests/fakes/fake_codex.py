@@ -25,6 +25,9 @@ print(json.dumps({"type": "item.completed", "item": {"id": "item_0", "type": "co
 last = {"ok": '{"summary": "probed", "blocked": "", "files": []}', "launch_failure": '{"summary": "probed", "blocked": "", "files": []}',
         "not_json": "I could not do that.", "wrong_shape": '{"summary": "probed"}'}[mode]
 print(json.dumps({"type": "item.completed", "item": {"id": "item_1", "type": "agent_message", "text": last}}))
-print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 31830, "cached_input_tokens": 15488, "cache_write_input_tokens": 0,
-                                                       "output_tokens": 295, "reasoning_output_tokens": 0}}))
+# The real CLI reports the thread's running total, so a resumed call's figures include every call before it.
+turns = 1 + sum(1 for call in calls[:-1] if call["argv"][0] == "exec") if args[1] == "resume" else 1
+print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 31830 * turns, "cached_input_tokens": 15488 * turns,
+                                                       "cache_write_input_tokens": 0, "output_tokens": 295 * turns,
+                                                       "reasoning_output_tokens": 0}}))
 Path(args[args.index("-o") + 1]).write_text(last, encoding="utf-8")
