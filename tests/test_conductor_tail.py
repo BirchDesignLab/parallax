@@ -5,7 +5,7 @@ from parallax import briefs, decisions, gitops
 from parallax.conductor import Conductor, _Stop
 from parallax.ledger import Journal, parse_lines
 from tests.conductor_kit import (CLAMP_OK, FILE, MUTANTS, PROBES, WEAK_PROBES, builds, kit_conductor, make_project,
-                                 probes, responds)
+                                 opens_whole, probes, responds)
 from tests.test_cli import call
 from tests.test_conductor_batch import proposes, reviews
 from tests.test_conductor_crossed import MISSING, NOTE, card, contested, last, ruled_cards, the
@@ -124,8 +124,9 @@ class Tail(unittest.TestCase):
     def test_a_task_opened_before_the_marker_is_counted_once_too_and_the_next_landing_numbers_it_once(self):
         root = make_project(); codex, claude = disagreeing()
         codex.script["build"], claude.script["probe"] = [builds()], [probes()]
-        c = kit_conductor(root, codex, claude)
+        c = kit_conductor(root, codex, claude, whole=True)
         self.assertEqual(c.run(root / TASK_FILE).status, "needs_ruling")
+        self.assertNotIn("batch_protocol", c.events(TASK)[0])
         c.rule(ONE, "a")
         killed_before_cleanup(self, c, root)
         history = on_main(root)
@@ -169,11 +170,15 @@ class Tail(unittest.TestCase):
         # first: its records move to the ledger, ahead of the task still in the journal.
         root = make_project(); codex, claude = disagreeing()
         codex.script["build"], claude.script["probe"] = [builds()], [probes()]
-        c = kit_conductor(root, codex, claude)
+        c = kit_conductor(root, codex, claude, whole=True)
         self.assertEqual(c.run(root / TASK_FILE, builder="codex").status, "needs_ruling")
         codex2, claude2 = disagreeing()
         c2, codex2, claude2 = seated(root, c, codex2.script, claude2.script)
+        opens_whole(c2)                                      # `seated` makes a conductor of its own
         self.assertEqual(c2.run(root / NEXT_FILE, builder="codex").status, "needs_ruling")
+        for task in (TASK, NEXT):                            # each opened once, as before the marker
+            [opening] = [e for e in c.events(task) if e["type"] == "task.opened"]
+            self.assertEqual((opening["interface_protocol"], "batch_protocol" in opening), ("whole", False))
         c.rule(f"D-{NEXT}-1", "a"); c.rule(ONE, "a")
         self.assertEqual([p["task"] for p in decisions.precedents(c.events())], [NEXT, TASK])
         killed_before_cleanup(self, c, root)
@@ -383,6 +388,7 @@ class Precedents(unittest.TestCase):
         root, c = self.source()
         codex, claude = agreeing()
         c2, codex, claude = seated(root, c, codex.script, claude.script)
+        opens_whole(c2)                                      # `_freeze` is the freeze of a task opened before the marker
         self.killed(c2, root, "_freeze")
         rewrite(c, self.unruled)
         self.refused(root, c2, codex, claude, c.status()[0]["detail"], calls=2)

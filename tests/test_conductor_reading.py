@@ -12,6 +12,13 @@ from tests.conductor_kit import (COMPARISON, DECISION, EMPTY_WITNESS, INTERFACE_
                                  interface_section, kit_conductor, make_project, reading, reveal, types)
 from tests.helpers import commit
 
+# Task 19.11: `run` opens a new behavior task confirmed-v1. This module tests the protocol before it (sealed
+# readings, reveals, one card per objection, whole-interface rulings), so its conductor opens tasks as Task 18 did.
+_kit_conductor = kit_conductor
+
+def kit_conductor(root, codex, claude):
+    return _kit_conductor(root, codex, claude, whole=True)
+
 TASK = "tasks/clamp-001.md"
 
 def agreeing():

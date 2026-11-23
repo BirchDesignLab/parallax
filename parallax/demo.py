@@ -123,8 +123,12 @@ def stub_seats() -> dict[str, Seat]:
         why = "Treat the bounds in either order so the same interval is accepted."
         def step(req):
             head = {"interface_ok": True, "interface_objection": ""}
+            # Only the fields the request's schema asks for: a task opened by an earlier version is
+            # resumed under its own protocol.
             if "interface_replacement" in req.schema["properties"]:
                 head["interface_replacement"] = ""
+            if "conflicts" in req.schema["properties"]:
+                head["conflicts"] = []
             return {**head,
                     "verdicts": [{"index": i, "agree": agree, "counter": counter,
                                   "why": "" if agree else why,

@@ -35,11 +35,19 @@ def make_project() -> Path:
         ".parallax/.gitignore": "run/\n", ".parallax/ledger.jsonl": "",
     })
 
-def kit_conductor(root: Path, codex: StubSeat, claude: StubSeat) -> Conductor:
+def kit_conductor(root: Path, codex: StubSeat, claude: StubSeat, whole: bool = False) -> Conductor:
+    """`whole` gives a conductor that opens new tasks as Task 18 did (see `opens_whole`)."""
     said = []
     conductor = Conductor(load_config(root), {"codex": codex, "claude": claude}, say=said.append,
                           home=Path(tempfile.mkdtemp(prefix="plx home ")))
     conductor.said = said
+    return opens_whole(conductor) if whole else conductor
+
+def opens_whole(conductor: Conductor) -> Conductor:
+    """Make `conductor` open each new task as the version before Task 19.11 did: `interface_protocol` whole and
+    no `batch_protocol`. For the tests of that protocol. A task that already has an opening is not affected."""
+    opening = conductor._open
+    conductor._open = lambda task, text, builder, **options: opening(task, text, builder, **{**options, "batch": False})
     return conductor
 
 def reading(*decisions, interface="clamplib.clamp(x, lo, hi) -> number"):
@@ -69,8 +77,11 @@ def reveal(*verdicts, interface_ok=True, objection="", replacement=""):
     witnesses = [witness_of(v) for v in verdicts]
     def step(req):
         head = {"interface_ok": interface_ok, "interface_objection": objection}
-        if replacement is not None:
+        properties = req.schema["properties"]                 # only the fields the request's schema asks for
+        if "interface_replacement" in properties and replacement is not None:
             head["interface_replacement"] = replacement
+        if "conflicts" in properties:
+            head["conflicts"] = []
         return {**head, "verdicts": [{"index": i, "agree": v[0], "counter": v[1], "why": "", "witness": witnesses[i]}
                                      for i, v in enumerate(verdicts)]}
     return step

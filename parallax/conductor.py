@@ -754,7 +754,9 @@ class Conductor:
             if "task.integrated" in ended:
                 return Outcome("landed", task, f"{task} has already landed")
         self._one_history(task)
-        t = self._open(task, text, builder, check_protocol=True)
+        # Task 19.11: a new behavior task is opened confirmed-v1. `_open` records an opening only for a task
+        # that has none, so a recorded opening decides for its task, whatever it says. A chore is never marked.
+        t = self._open(task, text, builder, batch=_parse_task(text)[0] == "behavior", check_protocol=True)
         if t.kind == "chore":
             return self._solo(t)
         if not t.batch or self._published(t) is None:
@@ -819,13 +821,17 @@ class Conductor:
               check_protocol: bool = False) -> _Task:
         """The task's opening, recorded now if it has none. `batch` marks a new opening confirmed-v1.
 
-        Only tests pass `batch` until Task 19.9. A recorded opening is never changed. An opening this
+        `run` passes it for a new behavior task (Task 19.11). A recorded opening is never changed. An opening this
         version cannot read blocks before the task's folder, a checkout or another event is created,
         and so, with `check_protocol` (as `run` passes it), does an event written under another protocol.
         """
         names = [s.name for s in self.cfg.seats]
         opened = self._first(task, "task.opened")
         if opened is None:
+            if _batched(self.events(task)):
+                # Task 19.11: confirmed-v1 records whose opening is gone are not given a new one. `status` and
+                # `rule` refuse that history; a new marked opening would make its cards rulable again.
+                raise _Stop(Outcome("blocked", task, _unopened(task)))
             kind, title = _parse_task(text)
             if builder is None:
                 k = sum(1 for e in self.events() if e["type"] == "task.opened" and e["task"] != task)

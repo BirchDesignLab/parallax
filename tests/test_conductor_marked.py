@@ -6,7 +6,8 @@ from parallax.ledger import parse_lines, sha256_text
 from parallax.schemas import validate
 from parallax.seats.stub import StubSeat
 from tests.conductor_kit import kit_conductor, make_project
-from tests.helpers import write
+from tests.helpers import commit, write
+from tests.test_batch import one_dispute
 from tests.test_conductor_batch import MARK, evidence, proposes, record_reveal, reviews
 from tests.test_conductor_reading import resumed
 from tests.test_decisions import NAN_WITNESS, ROLE_READINGS, ROLE_REVEALS, conflict, without
@@ -120,15 +121,32 @@ class Opening(unittest.TestCase):
         self.assertNotIn("batch_protocol", opened)
         self.assertEqual((opened["interface_protocol"], t.batch), ("whole", False))
 
-    def test_a_run_opens_an_unmarked_task(self):
+    def test_a_run_opens_a_behavior_task_marked_and_leaves_a_chore_and_a_recorded_opening_as_they_are(self):
         root = make_project()
-        stubs = {seat: StubSeat(seat, {"reading": [answers(ROLE_READINGS[role])], "reveal": [answers(UNMARKED_REVEALS[role])]})
+        one = one_dispute()
+        stubs = {seat: StubSeat(seat, {"reading": [answers(ROLE_READINGS[role])], "reveal": [answers(one[role])]})
                  for seat, role in (("codex", "builder"), ("claude", "challenger"))}
+        for stub in stubs.values():                       # whichever seat the chore falls to cannot do it today
+            stub.script["solo"] = [lambda req: {"summary": "", "blocked": "not today", "files": []}] * 2
+        # A chore as the task parser reads one: blank lines, surrounding space, any case, space after the colon.
+        commit(root, {CHORE_FILE: "\n  KIND:\tchore  \nFix the README wording.\n"}, "Reword the chore")
         c = kit_conductor(root, stubs["codex"], stubs["claude"])
-        ran(c, root)
+        self.assertEqual(ran(c, root), ("needs_ruling", "needs a ruling on D-clamp-001-1"))
         opened = c.events(TASK)[0]
-        self.assertEqual((opened["builder"], opened.get("interface_protocol"), "batch_protocol" in opened),
-                         ("codex", "whole", False))
+        self.assertEqual((opened["builder"], opened.get("interface_protocol"), opened.get("batch_protocol")),
+                         ("codex", "whole", "confirmed-v1"))
+        self.assertEqual([r.schema for r in stubs["claude"].calls if r.stage == "reveal"], [schemas.REVEAL_CONFIRMED])
+        # A chore is opened without the marker, as before.
+        ran(c, root, CHORE_FILE)
+        chore = c.events(CHORE)[0]
+        self.assertEqual((chore["type"], chore["kind"], "batch_protocol" in chore), ("task.opened", "chore", False))
+        # A task that already has an opening keeps it: one recorded without the marker is not marked by a later run.
+        root, c, t, bstub, cstub = project(batch=False, reveals=UNMARKED_REVEALS)
+        before = c.events(TASK)[0]
+        ran(c, root)
+        self.assertEqual(([e for e in c.events(TASK) if e["type"] == "task.opened"], "batch_protocol" in before),
+                         ([before], False))
+        self.assertEqual([r.schema for r in cstub.calls if r.stage == "reveal"], [schemas.REVEAL])
 
     def test_only_a_behavior_task_can_be_opened_marked(self):
         root = make_project()

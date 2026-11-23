@@ -120,7 +120,7 @@ class Rulings(unittest.TestCase):
         claude = StubSeat("claude", {"reading": [reading(interface=INTERFACE_B)], "reveal": [
             reveal((True, ""), interface_ok=False, objection="callers want the short name clip", replacement=INTERFACE_B)],
                                      "probe": [probes(clip_probes)], "respond": [responds("contest")]})
-        c = kit_conductor(root, codex, claude)
+        c = kit_conductor(root, codex, claude, whole=True)      # a Task 18 opening: its interface card is a dispute
         out = c.run(root / TASK)
         self.assertEqual([d.kind for d in out.disputes], ["interface"])
         c.rule(out.disputes[0].id, "b")

@@ -163,7 +163,7 @@ class Landing(unittest.TestCase):
     def test_a_task_started_before_accounting_lands_with_a_note(self):
         root = make_project()
         codex, claude = seats([builds()], [probes()])
-        c = kit_conductor(root, codex, claude)
+        c = kit_conductor(root, codex, claude, whole=True)      # such a task was opened before the marker too
         c._files = lambda t, seat: None
         self.assertEqual(c.run(root / TASK).status, "landed")
         self.assertIn("clamp-001: landing without delivery accounting (the task started before it existed)", c.said)

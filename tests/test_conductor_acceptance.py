@@ -1,9 +1,10 @@
-import json, unittest
+import json, os, subprocess, sys, unittest
 from pathlib import Path
 from unittest import mock
+import parallax
 from parallax import cli, gitops
 from parallax.conductor import Conductor
-from parallax.ledger import Journal
+from parallax.ledger import Journal, parse_lines
 from parallax.seats.stub import StubSeat
 from tests.conductor_kit import FILE, PROBES, builds, interface_section, kit_conductor, make_project, probes, responds
 from tests.test_batch import (A_POLICY, AGREE, ALIAS_REVEALS, ASSENT, NO_ASSENT, QUESTION, UNKNOWN, all_agreed,
@@ -20,8 +21,8 @@ from tests.test_decisions import ROLE_READINGS, ROLE_REVEALS, role_reveals
 BATCH = ("batch.proposed", "batch.reviewed")
 
 # Task 19.10. The pre-plan's acceptance cases (docs/designs/2026-11-19-task-19-codex-preplan.md, "Acceptance
-# fixtures"), run through `run`, `rule` and the CLI. Until Task 19.11 flips the default opener, `opened` is the
-# one line that makes the task confirmed-v1; everything after it is the normal entry points.
+# fixtures"), run through `run`, `rule` and the CLI. Since Task 19.11 `run` opens each new behavior
+# task confirmed-v1 itself.
 #
 # Every seat reply here is a fixture input written for the test from the findings of the recorded runs: the
 # private replies of those runs were removed at landing. The witnesses, attestations and interface wording are
@@ -29,10 +30,6 @@ BATCH = ("batch.proposed", "batch.reviewed")
 EMPTY = {"scenario": "", "observation": "", "theirs": "", "mine": "", "decided_by": ""}
 ONE = "D-clamp-001-1"
 FROZEN = ("stopped", "stopped after the contract was frozen")
-
-def opened(c, root, builder="codex", task=TASK, file=TASK_FILE):
-    """Open `task` confirmed-v1, as `run` will for a new behavior task from Task 19.11 on."""
-    return c._open(task, (root / file).read_text(encoding="utf-8"), builder, batch=True)
 
 def decision(question, answer, why):
     return {"question": question, "answer": answer, "why": why}
@@ -48,19 +45,15 @@ def object_(index, counter, why, scenario, observation, theirs, mine, decided_by
 def stages(seat):
     return [req.stage for req in seat.calls]
 
-def project(readings, reveals, propose=None, review=None, builder="codex"):
-    """A project whose clamp-001 is opened confirmed-v1 with `builder` building, and stub seats that hold one
-    reading and one reveal each and, when given, the builder's proposal and the challenger's review."""
+def project(readings, reveals, propose=None, review=None):
+    """A project and stub seats that hold one reading and one reveal each and, when given, the builder's
+    proposal and the challenger's review. The project's first task is built by codex, the first seat."""
     root = make_project()
-    challenger = "claude" if builder == "codex" else "codex"
-    scripts = {builder: {"reading": [answers(readings["builder"])], "reveal": [answers(reveals["builder"])],
-                         **({"batch_propose": [propose]} if propose else {})},
-               challenger: {"reading": [answers(readings["challenger"])], "reveal": [answers(reveals["challenger"])],
-                            **({"batch_review": [review]} if review else {})}}
-    stubs = {name: StubSeat(name, script) for name, script in scripts.items()}
-    c = kit_conductor(root, stubs["codex"], stubs["claude"])
-    opened(c, root, builder)
-    return root, c, stubs[builder], stubs[challenger]
+    codex = StubSeat("codex", {"reading": [answers(readings["builder"])], "reveal": [answers(reveals["builder"])],
+                               **({"batch_propose": [propose]} if propose else {})})
+    claude = StubSeat("claude", {"reading": [answers(readings["challenger"])], "reveal": [answers(reveals["challenger"])],
+                                 **({"batch_review": [review]} if review else {})})
+    return root, kit_conductor(root, codex, claude), codex, claude
 
 def to_contract(root, c):
     """A fresh conductor with no seat steps left runs to the freeze: its outcome, contract v1 and the calls made."""
@@ -600,17 +593,15 @@ NEXT_REVEALS = {
 }
 
 def ladder_project():
-    """A project with one old project ruling on main, and clamp-001 opened confirmed-v1 with its seats scripted
-    up to the builder's proposal; the challenger's review is left to the caller."""
+    """A project with one old project ruling on main, and seats scripted up to the builder's proposal; the
+    challenger's review is left to the caller."""
     root = make_project()
     rewrite_main(root, lambda events: events.append(dict(OLD)))
     codex = StubSeat("codex", {"reading": [answers(ROLE_READINGS["builder"])], "reveal": [answers(ALIAS_REVEALS["builder"])],
                                "batch_propose": [proposes(TWO_PENDING)]})
     claude = StubSeat("claude", {"reading": [answers(ROLE_READINGS["challenger"])],
                                  "reveal": [answers(ALIAS_REVEALS["challenger"])]})
-    c = kit_conductor(root, codex, claude)
-    opened(c, root)
-    return root, c, codex, claude
+    return root, kit_conductor(root, codex, claude), codex, claude
 
 def status(c):
     """The task's row; main's old ruling has a row of its own."""
@@ -697,6 +688,9 @@ class Ladder(unittest.TestCase):
         # 1. The builder's proposal is recorded and the challenger's process dies: nothing is public.
         claude.script["batch_review"] = [crashes]
         killed(self, c, root, "the seat process died")
+        opening = c.events(TASK)[0]
+        self.assertEqual((opening["type"], opening["builder"], opening["batch_protocol"]),
+                         ("task.opened", "codex", "confirmed-v1"))
         self.assertEqual(([e["type"] for e in c.events(TASK) if e["type"] in BATCH], settlements(c), status(c)),
                          (["batch.proposed"], [], IN_PROGRESS))
         not_rulable(self, root, c)
@@ -804,7 +798,6 @@ class Ladder(unittest.TestCase):
         c9, codex9, claude9 = seated(
             root, c, {"reading": [answers(NEXT_READINGS["builder"])], "reveal": [answers(NEXT_REVEALS["builder"])]},
             {"reading": [answers(NEXT_READINGS["challenger"])], "reveal": [answers(NEXT_REVEALS["challenger"])]})
-        opened(c9, root, task=NEXT, file=NEXT_FILE)
         self.assertEqual(told(c9.run(root / NEXT_FILE, builder="codex", stop_after="contract")), FROZEN)
         first = c9.events(NEXT)[0]
         [settled] = [e for e in c9.events(NEXT) if e["type"] == "reading.settled"]
@@ -819,3 +812,57 @@ class Ladder(unittest.TestCase):
         next_contract = (root / ".parallax/run" / NEXT / "contract-v1.md").read_text(encoding="utf-8")
         self.assertEqual(next_contract.split("## Precedents in force\n", 1)[1],
                          f"- P-1: {OLD['question']} -> No.\n- P-2: {QUESTION} -> {A_POLICY} (while: {WHILE})\n")
+
+
+# ---------------------------------------------------------------------------------------------------------
+# One writer. A ruling is one append under the run lock, and a second process is a second interpreter: the
+# real `python -m parallax rule`, started while this process holds the lock, and again after this process ruled.
+def other_process(root, *args):
+    """`python -m parallax rule <args> --repo <root>` in a process of its own: (exit code, stdout, stderr)."""
+    done = subprocess.run([sys.executable, "-m", "parallax", "rule", *args, "--repo", str(root)],
+                          cwd=Path(parallax.__file__).resolve().parents[1], capture_output=True, text=True,
+                          encoding="utf-8", timeout=120)
+    return done.returncode, done.stdout, done.stderr
+
+
+class OneWriter(unittest.TestCase):
+    def test_a_second_process_rules_nothing_while_the_first_holds_the_lock_or_after_it_has_ruled(self):
+        root, c, codex, claude = project(ROLE_READINGS, one_dispute())
+        self.assertEqual(told(run(c, root)), ("needs_ruling", f"needs a ruling on {ONE}"))
+        journal = c.journal.path.read_bytes()
+        held = c._lock(ONE)                                   # this process is the first writer
+        self.assertIsInstance(held, Path)
+        try:
+            self.assertEqual(other_process(root, ONE, "b"),
+                             (1, "", f"parallax: cannot rule now: another parallax run is active (pid {os.getpid()})\n"))
+            self.assertEqual((c.journal.path.read_bytes(), ruled(c)), (journal, []))
+            c._rule(ONE, "a", "", None, "", "")               # the first writer's ruling, under its lock
+        finally:
+            c._unlock(held)
+        [made] = ruled(c)
+        journal = c.journal.path.read_bytes()
+        self.assertTrue(journal.endswith(b"\n"))
+        # The lock is free again, and the card is ruled: the second process's retry is refused and appends nothing.
+        self.assertEqual(other_process(root, ONE, "b"), (1, "", f"parallax: {ONE} is already ruled\n"))
+        self.assertEqual((c.journal.path.read_bytes(), ruled(c), made["choice"]), (journal, [made], "a"))
+        self.assertFalse((root / ".parallax/run/lock").exists())
+
+
+# ---------------------------------------------------------------------------------------------------------
+# A settlement whose opening is gone. `status` and `rule` refuse that history, and a run must not give it a new
+# opening: a marked one would make its card rulable again (Codex's review of the 19.11 plan, finding 1).
+class LostOpening(unittest.TestCase):
+    def test_a_run_gives_no_new_opening_to_a_settlement_that_lost_its_own(self):
+        root, c, codex, claude = project(ROLE_READINGS, one_dispute())
+        self.assertEqual(told(run(c, root)), ("needs_ruling", f"needs a ruling on {ONE}"))
+        path = c.journal.path
+        events = parse_lines(path.read_text(encoding="utf-8"))
+        self.assertEqual([e["type"] for e in events].count("task.opened"), 1)
+        path.write_text("".join(json.dumps(e) + "\n" for e in events if e["type"] != "task.opened"),
+                        encoding="utf-8", newline="\n")
+        journal, calls = path.read_bytes(), (len(codex.calls), len(claude.calls))
+        detail = f"{TASK} has confirmed-v1 records and no task.opened"
+        self.assertEqual([(row["status"], row["detail"]) for row in status(c)], [("blocked", detail)])
+        self.assertEqual(told(run(c, root)), ("blocked", detail))           # the same task, not a later one
+        self.assertEqual(rule(root, ONE, "a"), (1, "", f"parallax: {TASK}'s reading.settled has no task.opened\n"))
+        self.assertEqual((path.read_bytes(), len(codex.calls), len(claude.calls)), (journal, *calls))

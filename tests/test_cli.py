@@ -25,7 +25,11 @@ class Cli(unittest.TestCase):
     def test_run_pauses_with_a_card_then_rule_then_run_lands(self):
         code, out, _ = call("run", str(self.root / "tasks/clamp-001.md"), *self.repo)
         self.assertEqual(code, 2)
-        for part in ("Dispute D-clamp-001-1 (reading)", "a) codex (builder): raise ValueError", "clamp-001: needs_ruling"):
+        # Task 19.11: a new task is confirmed-v1, so the card is its settlement's, printed as recorded.
+        for part in ("clamp-001: settlement published (direct)\n", "\nDispute D-clamp-001-1 (reading)\n",
+                     "\na) codex (builder):\n| raise ValueError\nb) claude (challenger):\n| swap the bounds\n"
+                     "other) Supply the policy with --note.\n", "\nparallax rule D-clamp-001-1 a\n",
+                     "\nclamp-001: needs_ruling  needs a ruling on D-clamp-001-1\n"):
             self.assertIn(part, out)
         code, out, _ = call("status", *self.repo)
         self.assertEqual((code, out.split()), (0, ["clamp-001", "needs_ruling", "D-clamp-001-1"]))

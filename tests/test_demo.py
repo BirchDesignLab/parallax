@@ -1,7 +1,14 @@
 import os, tempfile, unittest
 from pathlib import Path
+from parallax import demo, seats
+from parallax.conductor import Conductor
+from parallax.config import load_config
 from tests.helpers import run_git
 from tests.test_cli import call
+
+def events(where):
+    """The demo task's records, read as `status` reads them."""
+    return Conductor(load_config(where), {}, say=lambda s: None).events("clamp-001")
 
 class Demo(unittest.TestCase):
     def test_stub_demo_pauses_for_a_ruling_then_lands_with_a_receipt(self):
@@ -9,6 +16,14 @@ class Demo(unittest.TestCase):
         code, out, _ = call("demo", "--dir", str(where), "--stub")
         self.assertEqual(code, 2)
         self.assertIn("Dispute D-clamp-001-1 (reading)", out)
+        # Task 19.11: the demo's task is confirmed-v1. Its one objection settles directly, with no batch call,
+        # and the demo prints the commands the card allows.
+        history = events(where)
+        self.assertEqual((history[0].get("batch_protocol"), [e["mode"] for e in history if e["type"] == "reading.settled"],
+                          [e["type"] for e in history if e["type"] in ("batch.proposed", "batch.reviewed", "dispute.opened")]),
+                         ("confirmed-v1", ["direct"], []))
+        self.assertIn(f'\nrule with: python -m parallax rule D-clamp-001-1 a --repo "{where.resolve()}"   '
+                      "(or b, other --note TEXT)\n", out)
         self.assertEqual(call("rule", "D-clamp-001-1", "a", "--repo", str(where))[0], 0)
         code, out, _ = call("demo", "--dir", str(where), "--stub")
         self.assertEqual(code, 0)
@@ -54,3 +69,29 @@ class Demo(unittest.TestCase):
         self.assertEqual(code, 3, out)
         self.assertIn("scripted demo seats can carry out only ruling a", out)
         self.assertEqual(run_git(parent / "clamp demo", "log", "--format=%s"), "Demo project")   # nothing landed
+
+    def test_a_demo_opened_by_the_version_before_and_interrupted_before_its_reveal_resumes_as_it_was_opened(self):
+        where = Path(tempfile.mkdtemp(prefix="plx demo ")) / "clamp demo"
+        demo.make_fixture(where, stub=True)
+        with demo.stub_adapter():
+            cfg = load_config(where)
+            c = Conductor(cfg, seats.make_seats(cfg), say=lambda s: None)
+            t = c._open("clamp-001", demo.TASK_TEXT, None)     # as the version before opened it: no batch_protocol
+            c._readings(t)                                     # both readings sealed; killed before the reveal
+        self.assertEqual([e["type"] for e in events(where) if e["type"] not in ("checkout.created",)],
+                         ["task.opened", "reading.sealed", "reading.sealed"])
+        code, out, _ = call("demo", "--dir", str(where), "--stub")
+        self.assertEqual(code, 2, out)
+        history = events(where)
+        self.assertNotIn("batch_protocol", history[0])
+        self.assertEqual(([("batch_protocol" in e) for e in history if e["type"] == "reveal.done"],
+                          [e["type"] for e in history if e["type"] in ("reading.settled", "dispute.opened")]),
+                         ([False, False], ["dispute.opened"]))
+        # Its card is the one that version wrote, and the demo offers a (or b).
+        self.assertIn("\na) codex (builder): raise ValueError\nb) claude (challenger): swap the bounds\n", out)
+        self.assertIn(f'\nrule with: python -m parallax rule D-clamp-001-1 a --repo "{where.resolve()}"   (or b)\n', out)
+        self.assertEqual(call("rule", "D-clamp-001-1", "b", "--repo", str(where))[0], 0)
+        code, out, _ = call("demo", "--dir", str(where), "--stub")
+        self.assertEqual(code, 0, out)
+        self.assertIn("Verdict: ruled", out)
+        self.assertIn("lo, hi = hi, lo", (where / "clamplib/__init__.py").read_text(encoding="utf-8"))
