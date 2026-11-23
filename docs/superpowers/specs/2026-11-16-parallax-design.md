@@ -278,7 +278,17 @@ Verified by a real run of `python -m parallax demo` on 2026-11-23 (Codex CLI 0.1
 - Contract v1 froze from that record. Build 1 and probe 1 ran in parallel, crossing 1 passed (84 probes, 3 of 3 mutants caught), and the task landed with verdict `consensus`, about ten minutes after it opened. The same task took four human rulings on 2026-11-17.
 - Token use, as each CLI reported it: Codex 575,777 input (309,632 of it cached) and 33,750 output over four calls; Claude 177,139 input (57,295 cached) and 30,191 output over four calls. Codex's build call alone was 325,817 input, 202,112 cached. Every Codex call reported at least 35,840 cached input tokens, the reading included.
 
-Not yet run on real seats: a settlement that leaves a card and its ruling, a refusal, the direct path, and a resume after an interruption. The stub suite covers each.
+Verified by a second real run the same day, `python -m parallax run tasks/clamp-002.md` in that demo project, with the roles rotated (Claude building, Codex challenging). The task was written to contradict itself: "Values that cannot be compared with the bounds are skipped. The result always has one entry for each input value."
+
+- Both seats read the contradiction the same way (a value that cannot be compared stays in its position, unchanged), so it raised no dispute.
+- The route was the confirmed batch. Claude proposed; Codex refused, because the proposal's interface had dropped the guarantee that the new probes are discovered by the project's unittest command. The seats agreed which provisions a ruling would replace, so one refusal card was published, offering `other` or `drop`, covering ten provisions.
+- The human ruled `other` with one JSON note holding an interface and a policy (task scope by default). The run paused with exit code 2 and was resumed by a second `run` after the ruling.
+- Contract v1 froze from the settlement and the ruling. Crossing 1 failed the check; each seat responded once, the builder's commit changed and the challenger's did not; crossing 2 passed (108 probes, 3 of 3 mutants caught) and the task landed with verdict `ruled`, about fourteen minutes of seat time.
+- Token use as recorded: Claude 758,156 input (400,552 cached) and 29,620 output; Codex 2,215,010 input (1,569,024 cached) and 59,027 output. **These totals are probably overstated.** A call that resumes a session reports figures that look cumulative for the session: Codex's response call reported 953,964 input with exactly the 694,656 cached of its probe call (881,155 input) before it, and its reading, reveal and review calls each reported exactly 59,904 cached. If so, the conductor adds a session's running total once per call. Not yet checked against either CLI's event stream.
+
+What this run showed about the design: a refusal over one narrow omission cost the human a ruling that restates the interface and the policy for ten provisions. The protocol did what it specifies; whether a narrow refusal should go back to the seats first is an open design question.
+
+Not yet run on real seats: a settlement that leaves an A/B card, the direct path, and a run killed mid-step and resumed. The stub suite covers each.
 
 Not yet verified: nothing the design relies on. Rerun the probe when either CLI updates; it exits non-zero if any expectation fails.
 
