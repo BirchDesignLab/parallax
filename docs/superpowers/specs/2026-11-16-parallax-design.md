@@ -271,6 +271,15 @@ Verified by `scripts/probes/seat_smoke.py` on 2026-11-17, after the human signed
 - A sandboxed Codex command's `Test-Path` on the other seat's file, under the home folder, failed with "Access is denied". The other clone's permissions list no sandbox entry; Codex added `CodexSandboxUsers` and a per-run SID to its own clone only.
 - Cost note: a fresh `fable` call spends about 24k cache-creation tokens on Claude Code's own system prompt before the brief (about $0.49 for a one-word answer); `haiku` spends the same tokens for under a cent. Briefs should be few and full rather than many and small.
 
+Verified by a real run of `python -m parallax demo` on 2026-11-23 (Codex CLI 0.170.0 with `gpt-6.2-astra` at `xhigh` building, Claude Code 2.1.311 with `fable` at `high` challenging), the first run opened under the settlement of step 4:
+
+- Both seats returned a confirmed reveal. Codex objected to five of Claude's nine reading decisions; Claude objected to none of Codex's five. Codex flagged eight conflicts between provisions and Claude two.
+- The route was the confirmed batch. Codex's proposal call, read-only, gave seven common terms, no open choice and no withdrawal. Claude's review call, read-only, attested it. One `reading.settled` record was published, with no card.
+- Contract v1 froze from that record. Build 1 and probe 1 ran in parallel, crossing 1 passed (84 probes, 3 of 3 mutants caught), and the task landed with verdict `consensus`, about ten minutes after it opened. The same task took four human rulings on 2026-11-17.
+- Token use, as each CLI reported it: Codex 575,777 input (309,632 of it cached) and 33,750 output over four calls; Claude 177,139 input (57,295 cached) and 30,191 output over four calls. Codex's build call alone was 325,817 input, 202,112 cached. Every Codex call reported at least 35,840 cached input tokens, the reading included.
+
+Not yet run on real seats: a settlement that leaves a card and its ruling, a refusal, the direct path, and a resume after an interruption. The stub suite covers each.
+
 Not yet verified: nothing the design relies on. Rerun the probe when either CLI updates; it exits non-zero if any expectation fails.
 
 ## Left to the builder
