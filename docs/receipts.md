@@ -119,6 +119,8 @@ A trailer is one line, so runs of whitespace in the text, line breaks included, 
 
 Events from seat calls carry the token usage of the call. Events already written to a ledger keep the figures they were written with. [Field notes](field-notes.md) explains a correction to how Codex's usage is counted.
 
+**Known gap: the ledger records absolute paths.** Each `checkout.created` event stores the full path of a seat's clone, which sits under your home folder, and the ledger is committed. Publishing a project therefore publishes that path, account name included. No seat is shown it, so the blind is unaffected. Check `.parallax/ledger.jsonl` before you push a project to a public remote.
+
 ### The journal
 
 While a task runs, its events go to a journal, `.parallax/run/journal.jsonl`. The `.parallax/run/` folder also holds the check logs of each crossing, pending cards and the contract files, and git ignores it. Each event is written as one line with its newline in a single flushed write, so a torn write at the end of the file is never read as an event.

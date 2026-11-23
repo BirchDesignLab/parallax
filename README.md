@@ -114,6 +114,7 @@ Each seat works in its own clone, under a random name, in a state folder outside
 - A receipt says every landed change matched its accepted inventory of files. It does not say an independent reviewer judged each file relevant.
 - It runs one task at a time, with two seats, on Windows.
 - An A/B card, the direct settlement path and a run killed mid-step have so far run only on stub seats, not with real models.
+- Two known gaps are open. The committed ledger records each seat clone's absolute path, so publishing a project publishes a path under your home folder. And `exclusive` paths are added to the builder's scope without being removed from the challenger's, so keep the two scope lists apart yourself.
 
 ## How it was built
 

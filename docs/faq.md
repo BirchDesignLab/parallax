@@ -54,6 +54,10 @@ It targets Windows 11 and has not been tested elsewhere. How each seat is confin
 
 Not yet. v0 runs one task at a time with two seats. Several tasks in flight with crossed roles is first on the list after v0.
 
+## Is anything known to be wrong?
+
+Two gaps are open and documented. The committed ledger records each seat clone's absolute path, which includes your account name; see [Receipts and the ledger](receipts.md). And `exclusive` scope paths are not removed from the challenger's scope; see [parallax.toml](configuration.md). The design document lists every place the code differs from the original design.
+
 ## Why is it called Parallax?
 
 Parallax is how astronomers measure distance: look at one object from two positions and measure how far it appears to shift. Neither position alone can tell you. Here the two positions are two models, and the object is the change.
