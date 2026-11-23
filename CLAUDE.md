@@ -39,5 +39,7 @@ Work runs in rounds of plan tasks that do not depend on each other, with disjoin
 ## Working rules
 
 - Python 3.12, standard library only. Tests: `python -m unittest discover -s tests -t . -v`.
-- Local only: no remotes, no push.
+- Remote: `origin` is `github.com/BirchDesignLab/parallax`, which will be public. Push only when the developer asks.
+- Public hygiene (developer ruling 2026-11-23): commits are authored as `THobbs23` with the GitHub noreply address set in this repo's git config, never a personal email. No personal email, local account name or home-folder path in any tracked file: write `~` for the home folder.
+- History was rewritten once, on 2026-11-23, before the first push (`scripts/history/`). A commit hash quoted in an old commit message may be a pre-rewrite hash: `docs/history/2026-11-23-commit-map.txt` maps old to new.
 - After either CLI updates, rerun `python scripts/probes/seat_smoke.py` (exits non-zero on any failed expectation) and `python scripts/probes/job_object_seats.py`.
