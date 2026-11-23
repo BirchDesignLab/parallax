@@ -291,15 +291,13 @@ class TwoCards(unittest.TestCase):
                 self.assertEqual(told(frozen(self.c, self.root)[0]), FROZEN)
                 self.assertEqual(self.c.journal.path.read_bytes(), journal)
 
-    def test_a_settlement_card_comes_before_a_standalone_card_in_run_and_status(self):
+    def test_a_standalone_card_before_the_freeze_blocks_every_reader(self):
         # A check card, which only a failed crossing opens, written by hand while both settlement cards wait.
+        # Task 19.8 checks that it follows a frozen contract, so no reader shows it beside the settlement's.
         self.c.journal.append("dispute.opened", TASK, id=THREE, kind="check", question="Which result is right?",
                               a="The build's.", b="The probe's.", a_label="codex (builder)",
                               b_label="claude (challenger)", evidence="")
-        c2, codex, claude = resumed(self.root, self.c)
-        self.assertEqual(told(run(c2, self.root)), ("needs_ruling", f"needs a ruling on {ONE}, {TWO}"))
-        self.assertEqual(c2.status(), [{"task": TASK, "status": "needs_ruling", "pending": [ONE, TWO]}])
-        self.assertEqual((codex.calls, claude.calls), ([], []))
+        blocks(self, self.root, self.c, f"{THREE}'s dispute.opened comes before the contract is frozen", ONE, "a")
 
     def test_the_contract_is_the_one_the_packet_pinned_whatever_changed_since(self):
         # The task file edited and another task's project ruling made, both after publication: the contract
@@ -546,7 +544,7 @@ class Resume(unittest.TestCase):
         self.assertEqual([e["type"] for e in on_main(root)].count("task.dropped"), 1)
         self.assertEqual(on_main(root)[-1]["reason"], "Drop this task.")
 
-    def test_a_failed_crossing_stops_at_its_card_which_rule_refuses_until_task_19_8(self):
+    def test_a_failed_crossing_stops_at_its_card(self):
         root, c, t, settled = two_cards(self)
         self.assertEqual((rule(root, ONE, "a")[0], rule(root, TWO, "b")[0]), (0, 0))
         lose_folder(self, root, c, t)
@@ -566,6 +564,3 @@ class Resume(unittest.TestCase):
         c3, codex3, claude3 = resumed(root, c)
         self.assertEqual(told(run(c3, root)), ("needs_ruling", f"needs a ruling on {THREE}"))
         self.assertEqual((codex3.calls, claude3.calls, c3.journal.path.read_bytes()), ([], [], journal))
-        self.assertEqual(rule(root, THREE, "a"),
-                         (1, "", f"parallax: {THREE} is a standalone check card on a confirmed-v1 task\n"))
-        self.assertEqual(c2.journal.path.read_bytes(), journal)

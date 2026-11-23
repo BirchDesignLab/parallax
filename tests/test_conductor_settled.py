@@ -907,7 +907,8 @@ class Pending(unittest.TestCase):
         card = decisions.Dispute("D-clamp-001-9", "check", "Does test_clamp_nan pass?", "It passes.", "It fails.",
                                  "codex (builder)", "claude (challenger)")
         spoiled = edit_settled(lambda e: e.update(settlement_sha=ZERO), reseal=False)
-        cases = [(None, "D-clamp-001-9 is a standalone check card on a confirmed-v1 task"),
+        # Task 19.8: a check card is a failed crossing's, so on a confirmed-v1 task it follows a frozen contract.
+        cases = [(None, "D-clamp-001-9's dispute.opened comes before the contract is frozen"),
                  (spoiled, RECORD + "does not match its settlement_sha")]
         for spoil, detail in cases:
             with self.subTest(detail=detail):

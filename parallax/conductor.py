@@ -272,6 +272,76 @@ def _holds_card(event: dict, dispute_id: str) -> bool:
     return isinstance(rows, list) and any(isinstance(row, dict) and row.get("id") == dispute_id for row in rows)
 
 
+_CROSSING_KINDS = ("check", "mutant", "unresolved")
+_CROSSING_RULING_FIELDS = ("dispute", "kind", "question", "choice", "text", "scope", "while", "limitation")
+
+
+def _card_number(task: str, name) -> int | None:
+    """The number in `D-<task>-<number>`, a card ID as the conductor numbers it, or None."""
+    found = re.fullmatch(rf"D-{re.escape(task)}-([1-9][0-9]*)", name) if isinstance(name, str) else None
+    return int(found.group(1)) if found else None
+
+
+def _utf8(value) -> bool:
+    """Whether `value` is text a UTF-8 file can hold: a contract, a brief, a precedent and a receipt are such files."""
+    try:
+        return isinstance(value, str) and value.encode("utf-8") is not None
+    except UnicodeEncodeError:
+        return False
+
+
+def _crossing_opens(crossing: dict | None, kind: str, name: str, fresh: bool) -> bool:
+    """Whether `crossing`, the last one recorded before a card, opens a `kind` card with the ID `name` (Task 19.8).
+
+    A crossing that is not clean reserves IDs: one for a failed check, else one per surviving mutant, each
+    mapped to its mutant. A check or mutant card takes one of them. An unresolved card follows such a crossing
+    and takes a `fresh` ID, the next number above every reservation so far. Only the crossing's own record is
+    read, as it stood then: no check output, and not the repair limit, which may have changed since.
+    """
+    reserved = (crossing or {}).get("evidence")
+    if not isinstance(reserved, list) or not reserved:
+        return False
+    if kind == "unresolved":
+        return fresh
+    if kind == "check":
+        return crossing.get("passed") is False and name in reserved
+    mutant_of = crossing.get("mutant_of")
+    return isinstance(mutant_of, dict) and isinstance(mutant_of.get(name), str)
+
+
+def _crossing_ruling_problem(opened: dict, ruling: dict, mutant: str | None) -> str | None:
+    """Why `ruling` is not one `rule` writes for `opened`, a failed crossing's card on a confirmed-v1 task, or None.
+
+    Such a ruling is an ordinary one (Task 19.8): it carries no batch marker, repeats its card's kind and
+    question, makes a choice that kind allows (`drop` only for an unresolved card), and is scoped to the task
+    unless it rules a check. Its text, while and limitation are UTF-8 text. On a mutant card the text is the
+    chosen column of the card, and a waiver (`b`) starts its limitation by naming `mutant`, the one the card's
+    crossing reserved the ID for. On a check or unresolved card the text is the note or the default, never
+    blank or padded. `rule` asks before it writes, every reader on replay.
+    """
+    if {k for k in ruling if k not in ("ts", "type", "task")} != set(_CROSSING_RULING_FIELDS):
+        return "does not have exactly the fields of a ruling on a crossing card"
+    kind, choice, text, limitation = (ruling[field] for field in ("kind", "choice", "text", "limitation"))
+    if kind != opened.get("kind") or ruling["question"] != opened.get("question"):
+        return "has a kind or question its card does not give"
+    if choice not in (("a", "b", "drop") if kind == "unresolved" else ("a", "b")):
+        return "makes a choice its card does not allow"
+    if not all(_utf8(ruling[field]) for field in ("text", "while", "limitation")):
+        return "has a text, while or limitation that is not UTF-8 text"
+    if kind == "mutant" and text != opened.get(choice):
+        return "has a text that is not the column of its card it chose"
+    if kind != "mutant" and (not text or text != text.strip()):
+        return "has a text that is blank or padded"
+    if kind == "mutant" and choice == "b":
+        waiver = f"mutant {mutant} waived"
+        rest = limitation[len(waiver):]
+        if not limitation.startswith(waiver) or (rest and (rest[:2] not in (": ", "; ") or not rest[2:].strip())):
+            return f"has a limitation that does not waive mutant {mutant}"
+    if ruling["scope"] not in (("task", "project") if kind == "check" else ("task",)):
+        return "has a scope its card does not allow"
+    return None
+
+
 _SETTLEMENT_FIELDS = ("batch_protocol", "interface_protocol", "mode", "packet_sha", "proposal_sha", "review_sha",
                       "direct_packet", "common", "withdrawn", "proposal", "review", "choices", "refusal_reason",
                       "affected", "detail")
@@ -432,8 +502,9 @@ class Conductor:
         task_opened = self._first(opened[-1]["task"], "task.opened")
         if task_opened is not None:
             # Task 19.6: a legacy ruling only on a task run accepts, so its opening and protocol are checked as run
-            # checks them, and on a confirmed-v1 task its settlement too. There a standalone card is then refused
-            # (Task 19.5): that task's cards are its settlement's.
+            # checks them, and on a confirmed-v1 task its settlement, rulings, freezes and crossing cards too.
+            # There the only standalone card those checks pass is one the crossing before it opens (Task 19.8),
+            # and it is ruled as on any task.
             try:
                 t = self._task_of(opened[-1]["task"], "", task_opened)
                 self._check_protocol(t)
@@ -441,8 +512,6 @@ class Conductor:
                     self._published(t)
             except _Stop as stop:
                 raise ValueError(stop.outcome.detail) from None
-            if t.batch:
-                raise ValueError(f"{dispute_id} is a standalone {opened[-1].get('kind')} card on a {_BATCH_PROTOCOL} task")
         if any(e["type"] == "ruling.made" and e.get("dispute") == dispute_id for e in events):
             raise ValueError(f"{dispute_id} is already ruled")
         dispute = Dispute.from_event(opened[-1])
@@ -465,9 +534,14 @@ class Conductor:
             scope = decisions.default_scope(dispute.kind, whole_interface=whole)
         if scope not in ("task", "project"):
             raise ValueError(f"scope must be 'task' or 'project', not {scope!r}")
-        self.journal.append("ruling.made", opened[-1]["task"], dispute=dispute_id, kind=dispute.kind,
-                            question=dispute.question, choice=choice, text=text, scope=scope,
-                            **{"while": while_}, limitation=limitation)
+        fields = {"dispute": dispute_id, "kind": dispute.kind, "question": dispute.question, "choice": choice,
+                  "text": text, "scope": scope, "while": while_, "limitation": limitation}
+        if task_opened is not None and t.batch:
+            # Task 19.8: what every reader will require of this ruling is required before it is written.
+            problem = _crossing_ruling_problem(opened[-1], fields, self._mutant_of(events).get(dispute_id))
+            if problem:
+                raise ValueError(f"{dispute_id}'s ruling {problem}")
+        self.journal.append("ruling.made", opened[-1]["task"], **fields)
 
     def _rule_card(self, holders: list[str], dispute_id: str, choice: str, note: str, scope: str | None,
                    while_: str, limitation: str) -> None:
@@ -821,15 +895,24 @@ class Conductor:
         carry the marker and its settlement_sha, be the only one for that ID, and be exactly what `rule` writes
         for that row (`batch.ruling_problem`, Task 19.6). A frozen contract (Task 19.7) must come after a
         settlement that is not blocked, carry the marker and its settlement_sha, be version 1 as an integer and
-        the only one (until Task 19.8 no ruling amends a confirmed-v1 contract), follow a ruling on every card,
-        none of them a drop, and carry the sha of the contract the events before it give (`_settled_contract`).
-        These checks read only events, so a landed task replays from the ledger alone.
+        the first, follow a ruling on every card, none of them a drop, and carry the sha of the contract the
+        events before it give (`_settled_contract`). A later version (Task 19.8) must be the next integer, follow
+        a ruling since the version before it that amends the contract and a ruling on every card opened so far,
+        and carry the sha of that version as the events before it give it. It may not be missing either: once a
+        ruling amends the contract, a ruled repair or another crossing must follow the next version. A standalone
+        card (Task 19.8) must be a check, mutant or unresolved card that reads as a card, come after a frozen
+        contract, have an ID no other card has and be one the crossing before it opens (`_crossing_opens`); its
+        ruling must be the only one and one `rule` writes for it (`_crossing_ruling_problem`). These checks read
+        only events, so a landed task replays from the ledger alone.
         """
         events = self.events(t.id) if events is None else events
         settled = self._settlement(t, events)
         rows = {row["id"]: row for row in settled["choices"] if row["id"]} if settled else {}
         public = list(rows)
         ruled, after, frozen, dropped = set(), False, 0, False
+        # Task 19.8: each crossing card by ID with the mutant it stands for; the last crossing; the highest card
+        # number a crossing reserved; whether a ruling since the last freeze amends the contract.
+        crossed, crossing, top, amended = {}, None, 0, False
         for at, e in enumerate(events):
             after = after or e["type"] == "reading.settled"
             if e["type"] == "contract.frozen":
@@ -843,21 +926,63 @@ class Conductor:
                     raise _Stop(Outcome("blocked", t.id, f"{what} is not bound to the reading.settled record"))
                 if type(e.get("version")) is not int or e["version"] != frozen:
                     raise _Stop(Outcome("blocked", t.id, f"{what} is not version {frozen}"))
-                if frozen > 1:
+                if frozen > 1 and not amended:
                     raise _Stop(Outcome("blocked", t.id, f"{what} follows no ruling that amends the contract"))
-                unruled = [name for name in public if name not in ruled]
+                amended = False
+                unruled = [name for name in [*public, *crossed] if name not in ruled]
                 if unruled:
                     raise _Stop(Outcome("blocked", t.id, f"{what} is frozen before {', '.join(unruled)} is ruled"))
                 if dropped:
                     raise _Stop(Outcome("blocked", t.id, f"{what} freezes a dropped task"))
-                if e.get("sha") != sha256_text(self._settled_contract(t, settled, events[:at])):
+                if e.get("sha") != sha256_text(self._settled_contract(t, settled, events[:at], frozen)):
                     raise _Stop(Outcome("blocked", t.id, f"{what} is not the contract its settlement and rulings give"))
+                continue
+            if e["type"] == "crossing.done" or (e["type"] == "response.done" and e.get("ruling")):
+                # Task 19.8: the writer freezes an amended contract before the loser repairs and the seats cross
+                # again. A crossing its waivers made clean lands, and a drop ends, without another version.
+                if amended:
+                    raise _Stop(Outcome("blocked", t.id, f"contract v{frozen + 1} is missing after a ruling that "
+                                                         "amends the contract"))
+                if e["type"] == "crossing.done":
+                    crossing = e
+                    reserved = e.get("evidence") if isinstance(e.get("evidence"), list) else []
+                    top = max([top, *(_card_number(t.id, name) or 0 for name in reserved)])
+                continue
+            if e["type"] == "dispute.opened":
+                # Task 19.8: only a failed crossing opens a card on a confirmed-v1 task, so only after a freeze,
+                # and only a card that crossing's record gives.
+                name, kind = e.get("id"), e.get("kind")
+                if kind not in _CROSSING_KINDS:
+                    raise _Stop(Outcome("blocked", t.id, f"{name} is a standalone {kind} card on a "
+                                                         f"{_BATCH_PROTOCOL} task"))
+                try:
+                    Dispute.from_event(e)
+                except (KeyError, TypeError, ValueError):
+                    raise _Stop(Outcome("blocked", t.id, f"{name}'s dispute.opened does not read as a card")) from None
+                if not frozen:
+                    raise _Stop(Outcome("blocked", t.id, f"{name}'s dispute.opened comes before the contract is frozen"))
+                if name in public or name in crossed:
+                    raise _Stop(Outcome("blocked", t.id, f"{name} is the ID of more than one card"))
+                if not _crossing_opens(crossing, kind, name, _card_number(t.id, name) == top + 1):
+                    raise _Stop(Outcome("blocked", t.id, f"the crossing before {name} opens no such {kind} card"))
+                crossed[name] = (e, crossing["mutant_of"][name] if kind == "mutant" else None)
                 continue
             if e["type"] != "ruling.made":
                 continue
             name = e.get("dispute")
             if not after:
                 raise _Stop(Outcome("blocked", t.id, f"{name}'s ruling.made comes before the reading.settled record"))
+            if isinstance(name, str) and name in crossed:
+                if name in ruled:
+                    raise _Stop(Outcome("blocked", t.id, f"{name} has more than one ruling.made"))
+                opened, mutant = crossed[name]
+                problem = _crossing_ruling_problem(opened, e, mutant)
+                if problem:
+                    raise _Stop(Outcome("blocked", t.id, f"{name}'s ruling.made {problem}"))
+                ruled.add(name)
+                dropped = dropped or e["choice"] == "drop"
+                amended = amended or bool(self._amendment(e))
+                continue
             if name not in public:
                 raise _Stop(Outcome("blocked", t.id, f"{name}'s ruling.made rules no card of the reading.settled record"))
             if e.get("batch_protocol") != _BATCH_PROTOCOL or e.get("settlement_sha") != settled["settlement_sha"]:
@@ -1257,13 +1382,16 @@ class Conductor:
                 interface = ruling["text"] if t.whole else f"{interface}\nAmended: {ruling['text']}"
         return interface, points
 
-    def _settled_contract(self, t: _Task, settled: dict, events: list[dict]) -> str:
-        """Task 19.7: contract v1 of a confirmed-v1 task, as text, from `events` alone.
+    def _settled_contract(self, t: _Task, settled: dict, events: list[dict], version: int = 1) -> str:
+        """Task 19.7: contract `version` of a confirmed-v1 task, as text, from `events` alone.
 
         The task text and the precedents are the ones the settlement's packet pinned, and the terms come from
         the settlement and the rulings in `events`, each checked by the caller. So the writer and every later
         reader render the same text, whatever the task file or another task's rulings say by then, and no
         private artifact is read. The text is encoded here, before a file or an event is written.
+
+        A later version (Task 19.8) is the same base, then what each ruling after contract v1 adds
+        (`_amendment`), in order.
         """
         packet = settled["direct_packet"] if settled["mode"] == "direct" else next(
             e["packet"] for e in events
@@ -1271,8 +1399,11 @@ class Conductor:
         rulings = {e["dispute"]: e for e in events if e["type"] == "ruling.made"}
         try:
             interface, terms = batch.contract_terms(settled, rulings)
-            text = decisions.render_contract(t.id, 1, packet["task"], interface, [Point(*term) for term in terms],
-                                             packet["precedents"])
+            points = [Point(*term) for term in terms]
+            first = next((i for i, e in enumerate(events) if e["type"] == "contract.frozen"), len(events))
+            for e in events[first + 1:]:
+                points.extend(self._amendment(e))
+            text = decisions.render_contract(t.id, version, packet["task"], interface, points, packet["precedents"])
             text.encode("utf-8")                            # a contract is a UTF-8 file; say so, never the text
         except UnicodeEncodeError:
             raise _Stop(Outcome("blocked", t.id, "the contract cannot be frozen: it is not UTF-8 text")) from None
@@ -1280,16 +1411,16 @@ class Conductor:
             raise _Stop(Outcome("blocked", t.id, f"the contract cannot be frozen: {exc}")) from None
         return text
 
-    def _freeze_settled(self, t: _Task) -> None:
-        """Task 19.7: freeze contract v1 of a confirmed-v1 task, bound to the settlement it was rendered from."""
+    def _freeze_settled(self, t: _Task, version: int = 1) -> None:
+        """Task 19.7: freeze contract `version` of a confirmed-v1 task, bound to the settlement it was rendered from."""
         events = self.events(t.id)
         settled, _ = self._published(t, events)
-        text = self._settled_contract(t, settled, events)
-        self._write(self._run_dir(t) / "contract-v1.md", text)
+        text = self._settled_contract(t, settled, events, version)
+        self._write(self._run_dir(t) / f"contract-v{version}.md", text)
         marker = {"interface_protocol": "whole"} if t.whole else {}
-        self.journal.append("contract.frozen", t.id, version=1, sha=sha256_text(text), **marker,
+        self.journal.append("contract.frozen", t.id, version=version, sha=sha256_text(text), **marker,
                             batch_protocol=_BATCH_PROTOCOL, settlement_sha=settled["settlement_sha"])
-        self.say(f"{t.id}: contract v1 frozen")
+        self.say(f"{t.id}: contract v{version} frozen")
 
     @staticmethod
     def _mismatch(what: str, task: str, whole: bool) -> str:
@@ -1659,6 +1790,10 @@ class Conductor:
         events = self.events(t.id)
         frozen = [i for i, e in enumerate(events) if e["type"] == "contract.frozen"]
         if not any(self._amendment(e) for e in events[frozen[-1] + 1:]):
+            return
+        if t.batch:
+            # Task 19.8: the settlement's base and every amendment since v1, bound and checked as v1 is.
+            self._freeze_settled(t, events[frozen[-1]]["version"] + 1)
             return
         interface, points = self._contract_points(t)
         for e in events[frozen[0] + 1:]:
