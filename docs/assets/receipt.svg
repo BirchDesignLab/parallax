@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 326" width="960" height="326" role="img" aria-label="A landing commit&#x27;s receipt: task, contract hash, builder, challenger, checks and verdict.">
+<title>A landing commit&#x27;s receipt: task, contract hash, builder, challenger, checks and verdict.</title>
+<style>
+.s{font-family:'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif}.m{font-family:ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}
+
+@media (prefers-reduced-motion: reduce){*{animation:none!important}}
+</style>
+<rect width="960" height="326" rx="14" fill="#0c1726"/>
+<text x="28" y="44" class="s" font-size="20" fill="#e9eff6" text-anchor="start" font-weight="600" >Every commit on main carries its receipt</text>
+<rect x="28" y="76" width="548" height="214" rx="7" fill="#13243b" stroke="#2c4361"/>
+<text x="48" y="106" class="m" font-size="13" fill="#8da2b9" text-anchor="start" font-weight="400" >293c8db</text>
+<text x="120" y="106" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="600" >clamp-001: Add clamp(x, lo, hi) to clamplib</text>
+<line x1="28" y1="122" x2="576" y2="122" stroke="#2c4361" stroke-width="1" />
+<text x="48" y="150" class="m" font-size="13" fill="#8da2b9" text-anchor="start" font-weight="400" >Parallax-Task:</text>
+<text x="208" y="150" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="400" >clamp-001</text>
+<text x="48" y="174" class="m" font-size="13" fill="#8da2b9" text-anchor="start" font-weight="400" >Parallax-Contract:</text>
+<text x="208" y="174" class="m" font-size="13" fill="#c3d0de" text-anchor="start" font-weight="400" >sha256:c317c9e49ac1...6a93fe083</text>
+<text x="48" y="198" class="m" font-size="13" fill="#8da2b9" text-anchor="start" font-weight="400" >Built-by:</text>
+<text x="208" y="198" class="m" font-size="13" fill="#5cc8f2" text-anchor="start" font-weight="400" >codex gpt-6.2-astra/xhigh</text>
+<text x="48" y="222" class="m" font-size="13" fill="#8da2b9" text-anchor="start" font-weight="400" >Challenged-by:</text>
+<text x="208" y="222" class="m" font-size="13" fill="#f5b041" text-anchor="start" font-weight="400" >claude fable/high</text>
+<text x="48" y="246" class="m" font-size="13" fill="#8da2b9" text-anchor="start" font-weight="400" >Checks:</text>
+<text x="208" y="246" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="400" >84 probes passed, 3 of 3 mutants caught</text>
+<text x="48" y="270" class="m" font-size="13" fill="#8da2b9" text-anchor="start" font-weight="400" >Verdict:</text>
+<text x="208" y="270" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="600" >consensus</text>
+<text x="606" y="90" class="s" font-size="13.5" fill="#c3d0de" text-anchor="start" font-weight="600" >The verdict says how it got there</text>
+<text x="606" y="120" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="600" >consensus</text>
+<text x="606" y="136" class="s" font-size="12" fill="#8da2b9" text-anchor="start" font-weight="400" >clean at the first crossing</text>
+<text x="606" y="157" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="600" >resolved</text>
+<text x="606" y="173" class="s" font-size="12" fill="#8da2b9" text-anchor="start" font-weight="400" >the seats settled a dispute</text>
+<text x="606" y="194" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="600" >ruled</text>
+<text x="606" y="210" class="s" font-size="12" fill="#8da2b9" text-anchor="start" font-weight="400" >a human ruling was needed</text>
+<text x="606" y="231" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="600" >limited</text>
+<text x="606" y="247" class="s" font-size="12" fill="#8da2b9" text-anchor="start" font-weight="400" >accepted with a stated limitation</text>
+<text x="606" y="268" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="600" >solo</text>
+<text x="606" y="284" class="s" font-size="12" fill="#8da2b9" text-anchor="start" font-weight="400" >a chore, built by one seat</text>
+<text x="28" y="308" class="s" font-size="11.5" fill="#8da2b9" text-anchor="start" font-weight="400" >The receipt of the first real run with the settlement, 2026-11-23. Hash shortened to fit.</text>
+</svg>

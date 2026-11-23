@@ -41,7 +41,16 @@ Work runs in rounds of plan tasks that do not depend on each other, with disjoin
 ## Working rules
 
 - Python 3.12, standard library only. Tests: `python -m unittest discover -s tests -t . -v`.
-- Remote: `origin` is `github.com/BirchDesignLab/parallax`, which will be public. Push only when the developer asks.
+- Remote: `origin` is `github.com/BirchDesignLab/parallax`, which will be public. Work reaches `main` through a branch and a pull request (developer ruling 2026-11-23), not a direct push. Push only when the developer asks.
 - Public hygiene (developer ruling 2026-11-23): commits are authored as `THobbs23` with the GitHub noreply address set in this repo's git config, never a personal email. No personal email, local account name or home-folder path in any tracked file: write `~` for the home folder.
 - History was rewritten twice on 2026-11-23, around the first push (`scripts/history/`): first the author email and a local account name, then the working notes were removed, which dropped the commits that touched only them. A commit hash quoted in an old commit message may be a pre-rewrite hash: `docs/history/2026-11-23-commit-map.txt` maps old to new.
 - After either CLI updates, rerun `python scripts/probes/seat_smoke.py` (exits non-zero on any failed expectation) and `python scripts/probes/job_object_seats.py`.
+
+## Public documentation
+
+The README and `docs/*.md` are what a visitor reads (developer direction 2026-11-23: showpiece quality).
+
+- Every statement is traceable to the code, the spec or recorded output. Where the code and the spec differ, the docs follow the code. Output shown as real is real: the stub demo's, or a dated live run's.
+- Figures in `docs/assets/` are generated: edit `scripts/docs/build_assets.py` and rerun it, never the SVG. Warm is the claude seat, cool is the codex seat. Monospace only for code and command-line text.
+- Voice: plain and exact, for engineers who use agent CLIs daily. No hype words, no em dashes, sentence-case headings. Say what is not verified.
+- A code change that alters behavior a page describes updates that page in the same pull request.
