@@ -8,8 +8,8 @@ from parallax.ledger import parse_lines
 from parallax.seats.stub import StubSeat
 from tests.conductor_kit import interface_section, kit_conductor, make_project, reading, reveal
 from tests.test_batch import (ALIAS_FALLBACK, ALIAS_REVEALS, FALLBACK, INPUTS, INTERFACE_TERM, MOVED, PROPOSAL, REFUSE,
-                              REFUSED_PROPOSAL, REVIEW, SEATS, TWO_CHOICES, TWO_REVIEW, WITHDRAWAL, changed,
-                              one_dispute)
+                              REFUSED_PROPOSAL, RETURNED_TERM, REVIEW, SEATS, TWO_CHOICES, TWO_REVIEW, WITHDRAWAL,
+                              changed, json_blocks, one_dispute)
 from tests.test_cli import call
 from tests.test_conductor_batch import evidence, proposes, reviews
 from tests.test_conductor_marked import seeded
@@ -785,6 +785,34 @@ class Pending(unittest.TestCase):
         self.assertEqual(told(run(c2, root)), ("blocked", detail))
         self.assertEqual(c2.status(), [{"task": TASK, "status": "blocked", "pending": [], "detail": detail,
                                         "affected": []}])
+
+    def test_a_reviewer_refusing_a_proposal_that_weakens_a_promise_blocks_with_no_card(self):
+        # Task 19.12. The proposal still cites builder/1 for its common term and weakens what the term says: the
+        # object passed became a value equal to it. No coverage check can see that. The challenger reads the
+        # proposal, refuses and names builder/1; the fallback leaves builder/1 out, so nothing can be ruled.
+        weak = {**RETURNED_TERM, "text": "A value equal to one of the objects passed."}
+        reason = "the proposal turns the object passed into a value equal to it"
+        shown, refuses = [], reviews(REFUSE, refusal_reason=reason)
+
+        def review(req):
+            shown.append(json_blocks(req.brief)[1])
+            return refuses(req)
+
+        root, c, t, codex, claude = marked(propose=proposes(common=[INTERFACE_TERM, weak], fallback=FALLBACK),
+                                           review=review)
+        self.assertEqual(told(run(c, root)), ("blocked", BLOCKED))
+        # The weakened term reached the one review, under the source it claims.
+        [proposal] = shown
+        self.assertEqual((proposal["decision"], proposal["common"]), ("propose", [INTERFACE_TERM, weak]))
+        self.assertEqual([e["type"] for e in c.events(TASK) if e["type"] in ("batch.proposed", "batch.reviewed")],
+                         ["batch.proposed", "batch.reviewed"])
+        [settled] = settlements(c)
+        self.assertEqual((settled["mode"], settled["common"], settled["choices"], settled["affected"],
+                          settled["refusal_reason"], settled["detail"]),
+                         ("blocked", [], [], ["builder/1"], f"challenger: {reason}", "the fallback leaves out builder/1"))
+        self.assertEqual(c.status(), [{"task": TASK, "status": "blocked", "pending": [], "detail": BLOCKED,
+                                       "affected": ["builder/1"]}])
+        self.assertFalse((root / ".parallax/run" / TASK / "cards").exists())
 
     def test_a_refusal_publishes_one_card_with_every_replaced_and_surviving_term(self):
         root, c, t, codex, claude = marked(propose=proposes(fallback=ALIAS_FALLBACK), review=reviews(ALIAS_REFUSE),

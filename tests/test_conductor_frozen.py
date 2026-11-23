@@ -274,6 +274,9 @@ class TwoCards(unittest.TestCase):
         multiline = "Raise ValueError unless lo <= hi.\nPolicy: NaN bounds raise too.\n"
         cases = [((("a",), ("b",)), contract(CLIP, RETURNED, (QUESTION, A_POLICY, f"ruled {ONE}"))),
                  ((("b",), ("a",)), contract("clamp(x, lo, hi)", RETURNED, (QUESTION, B_POLICY, f"ruled {ONE}"))),
+                 # Task 19.12: the same letter on both cards. Each card's letter picks its own column.
+                 ((("a",), ("a",)), contract("clamp(x, lo, hi)", RETURNED, (QUESTION, A_POLICY, f"ruled {ONE}"))),
+                 ((("b",), ("b",)), contract(CLIP, RETURNED, (QUESTION, B_POLICY, f"ruled {ONE}"))),
                  ((("other", "--note", multiline), ("other", "--note", "clip(x, lo, hi)")),
                   contract("clip(x, lo, hi)", RETURNED, (QUESTION, multiline, f"ruled {ONE}")))]
         for (first, second), expected in cases:
