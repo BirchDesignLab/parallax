@@ -11,6 +11,7 @@ import re
 import sys
 from pathlib import Path
 
+# The build plan is a working note, ignored by git and absent from a fresh clone.
 PLAN = Path(__file__).resolve().parents[2] / "docs/superpowers/plans/2026-11-16-parallax-v0.md"
 
 

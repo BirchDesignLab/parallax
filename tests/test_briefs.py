@@ -113,7 +113,7 @@ class Briefs(unittest.TestCase):
         self.assertIn("`interface_objection` to an empty string", briefs.reveal("builder", OTHER, whole=False))
 
     def test_the_prior_briefs_are_pinned_to_the_reviewed_task_17_text(self):
-        # SHA-256 of the UTF-8 text at commit 34b892a, checked by the controller and by Codex's second review.
+        # SHA-256 of the UTF-8 text as reviewed on 2026-11-19, checked by the controller and by Codex's second review.
         sha = lambda text: hashlib.sha256(text.encode("utf-8")).hexdigest()
         pinned = {
             ("reading", "builder"): "b6ca5c532f9d262e65d9f9489ca3e14aa7f619cc5db422a2e86e797d3baf179d",
@@ -206,7 +206,7 @@ class Briefs(unittest.TestCase):
         self.assertIn("https://example.com/a", briefs.solo("See https://example.com/a", self.cfg))
 
     def test_task_18_reveal_briefs_are_pinned(self):
-        # SHA-256 of the UTF-8 text at commit afb5b25, before Task 19.1 added own_reading.
+        # SHA-256 of the UTF-8 text as it stood just before Task 19.1 added own_reading.
         sha = lambda text: hashlib.sha256(text.encode("utf-8")).hexdigest()
         pinned = {"builder": "0e57cead15ac2c0a7e9f801c95e545cc2f540916c3ae3e4524d1b4ce7e18c1f1",
                   "challenger": "a0dc3da8af66a4045eeddc41568a8309584da7caeae6a1e0675a80d8c3293860"}

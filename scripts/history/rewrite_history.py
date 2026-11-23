@@ -11,7 +11,12 @@ It never touches the source repository. It writes:
 
 Usage:
   python scripts/history/rewrite_history.py --source . --out .superpowers/rewrite \
-      --email OLD=NEW [--email OLD=NEW ...] [--replace REGEX=TEXT ...]
+      --email OLD=NEW [--email OLD=NEW ...] [--replace REGEX=TEXT ...] \
+      [--exclude PATH ...] [--refs main]
+
+--exclude (second run, 2026-11-23: working notes left the public history) removes a path
+from every commit; a commit that touched only excluded paths disappears, and its line is
+missing from the commit map.
 
 --email changes author, committer and tagger emails that equal OLD.
 --replace applies a regular expression (bytes, case-insensitive) to every blob and every
@@ -46,6 +51,8 @@ def main() -> int:
     parser.add_argument("--out", required=True)
     parser.add_argument("--email", action="append", default=[])
     parser.add_argument("--replace", action="append", default=[])
+    parser.add_argument("--exclude", action="append", default=[], help="a path to leave out of every commit")
+    parser.add_argument("--refs", default="--all", help="what to export: --all, or one branch name")
     args = parser.parse_args()
 
     source, out = Path(args.source).resolve(), Path(args.out).resolve()
@@ -56,8 +63,11 @@ def main() -> int:
     subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
 
     marks = out / "marks"
-    export = subprocess.Popen(["git", "-C", str(source), "fast-export", "--all", "--show-original-ids",
-                               "--signed-tags=strip", "--reencode=yes"], stdout=subprocess.PIPE)
+    # With pathspecs fast-export leaves the excluded paths out of every commit and drops
+    # the commits that touched nothing else.
+    limits = ["--", ".", *(f":(exclude){path}" for path in args.exclude)] if args.exclude else []
+    export = subprocess.Popen(["git", "-C", str(source), "fast-export", args.refs, "--show-original-ids",
+                               "--signed-tags=strip", "--reencode=yes", *limits], stdout=subprocess.PIPE)
     load = subprocess.Popen(["git", "-C", str(repo), "fast-import", "--quiet", f"--export-marks={marks}"],
                             stdin=subprocess.PIPE)
     stream, sink = export.stdout, load.stdin

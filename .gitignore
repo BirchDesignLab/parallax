@@ -3,3 +3,39 @@ __pycache__/
 .parallax/run/
 # Working scratch for agents and test runs; reusable records go in docs/ and scripts/
 /.superpowers/
+
+# Working notes: kept on the developer's machine, not published (CLAUDE.md, "Published and unpublished")
+/docs/briefs/
+/docs/handoffs/
+/docs/designs/
+/docs/findings/
+/docs/round-*/
+/docs/superpowers/plans/
+
+# Agent and editor settings
+/.claude/
+.vscode/
+.idea/
+
+# Python
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets and local environment
+.env
+.env.*
+*.pem
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -20,7 +20,7 @@ from tests.test_decisions import ROLE_READINGS, ROLE_REVEALS, role_reveals
 
 BATCH = ("batch.proposed", "batch.reviewed")
 
-# Task 19.10. The pre-plan's acceptance cases (docs/designs/2026-11-19-task-19-codex-preplan.md, "Acceptance
+# Task 19.10. The pre-plan's acceptance cases (working notes, not published: docs/designs/2026-11-19-task-19-codex-preplan.md, "Acceptance
 # fixtures"), run through `run`, `rule` and the CLI. Since Task 19.11 `run` opens each new behavior
 # task confirmed-v1 itself.
 #

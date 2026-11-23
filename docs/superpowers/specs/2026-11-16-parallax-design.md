@@ -12,7 +12,7 @@ That is all the human has said about what and why. Anything below that is not ma
 
 ## Where this design came from
 
-Claude Code and Codex each wrote a proposal without seeing the other's (`docs/round-0`), then each reviewed the other's (`docs/round-1`). They arrived at the same core independently, which is the main reason to trust it.
+Claude Code and Codex each wrote a proposal without seeing the other's, then each reviewed the other's. (Those rounds, like the build plan, briefs, reviews and handoffs this document cites under `docs/`, are working notes kept out of the published repository.) They arrived at the same core independently, which is the main reason to trust it.
 
 The core: two different models make less correlated mistakes than two copies of one model. So a project is not split into halves. Each task is split into two sides: one agent builds it while the other, without seeing the code, writes the checks that will judge it. When they agree, that is evidence. When they disagree, that is the valuable output: it is either a bug or a hole in the spec, and it is the only thing worth the human's attention.
 

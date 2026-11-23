@@ -2,6 +2,8 @@
 
 A Python conductor that pairs two agent CLIs on one task: one builds, the other writes probes blind, and the result lands on main with a receipt. Spec: `docs/superpowers/specs/2026-11-16-parallax-design.md`. Build plan: `docs/superpowers/plans/2026-11-16-parallax-v0.md` (tick its checkboxes as tasks land).
 
+**Published and unpublished** (developer ruling 2026-11-23, before the repository went public). The repository carries the code, tests, scripts, the spec and `docs/history/`. Working notes stay on this machine, ignored by git and purged from history: `docs/briefs/`, `docs/handoffs/`, `docs/designs/`, `docs/findings/`, `docs/round-0..2/` and `docs/superpowers/plans/`. Keep writing them where the rules below say; they are simply not committed. Git no longer backs them up, and a hash quoted in one may be a pre-rewrite hash. A published file must not depend on an unpublished one.
+
 ## Where files go
 
 Developer direction 2026-11-17, after parallel agents collided in shared temp folders and one wiped %TEMP%.
@@ -10,7 +12,7 @@ Developer direction 2026-11-17, after parallel agents collided in shared temp fo
 
 | What | Home |
 |---|---|
-| Anything reusable: briefs, handoffs, decisions, findings | `docs/` (committed) |
+| Anything reusable: briefs, handoffs, decisions, findings | `docs/` (the working-note folders above are ignored; the rest is committed) |
 | Scripts of any kind, including one-off probes and checks | `scripts/` in a subfolder (`scripts/probes/`), committed |
 | Working scratch: command output dumps, agent working files, test-run folders, probe raw output | `.superpowers/` (ignored). Promote anything later work depends on into `docs/` first |
 
@@ -41,5 +43,5 @@ Work runs in rounds of plan tasks that do not depend on each other, with disjoin
 - Python 3.12, standard library only. Tests: `python -m unittest discover -s tests -t . -v`.
 - Remote: `origin` is `github.com/BirchDesignLab/parallax`, which will be public. Push only when the developer asks.
 - Public hygiene (developer ruling 2026-11-23): commits are authored as `THobbs23` with the GitHub noreply address set in this repo's git config, never a personal email. No personal email, local account name or home-folder path in any tracked file: write `~` for the home folder.
-- History was rewritten once, on 2026-11-23, before the first push (`scripts/history/`). A commit hash quoted in an old commit message may be a pre-rewrite hash: `docs/history/2026-11-23-commit-map.txt` maps old to new.
+- History was rewritten twice on 2026-11-23, around the first push (`scripts/history/`): first the author email and a local account name, then the working notes were removed, which dropped the commits that touched only them. A commit hash quoted in an old commit message may be a pre-rewrite hash: `docs/history/2026-11-23-commit-map.txt` maps old to new.
 - After either CLI updates, rerun `python scripts/probes/seat_smoke.py` (exits non-zero on any failed expectation) and `python scripts/probes/job_object_seats.py`.
