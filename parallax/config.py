@@ -64,6 +64,7 @@ class Config:
     max_repair_rounds: int
     mutants: int
     seats: tuple[SeatConfig, ...]
+    exclusive_scope: tuple[str, ...] = ()     # also in builder_scope; closed to the challenger
 
     @property
     def run_dir(self) -> Path:
@@ -108,6 +109,23 @@ def _patterns(table: dict, key: str, required: bool) -> tuple[str, ...]:
     return tuple(value)
 
 
+_KEYS = {
+    "": ("project", "scopes", "policy", "seats"),
+    "project": ("check", "lint", "main", "check_timeout", "seat_timeout", "count_pattern"),
+    "scopes": ("builder", "challenger", "exclusive"),
+    "policy": ("merge", "pair", "max_repair_rounds", "mutants"),
+    "seat": ("adapter", "model", "effort"),
+}
+
+
+def _only(table: dict, where: str, kind: str) -> None:
+    """Reject a key the config does not have: a misspelled key would otherwise fall back to its default unseen."""
+    unknown = sorted(key for key in table if key not in _KEYS[kind])
+    if unknown:
+        name = f"{where}.{unknown[0]}" if where else f"[{unknown[0]}]"
+        raise ConfigError(f"{CONFIG_NAME}: unknown key {name} (known: {', '.join(_KEYS[kind])})")
+
+
 def load_config(root: Path) -> Config:
     path = Path(root) / CONFIG_NAME
     try:
@@ -123,6 +141,10 @@ def load_config(root: Path) -> Config:
     scopes = _table(doc, "scopes")
     policy = _table(doc, "policy", required=False)
     seats_table = _table(doc, "seats", required=False)
+    _only(doc, "", "")
+    _only(project, "project", "project")
+    _only(scopes, "scopes", "scopes")
+    _only(policy, "policy", "policy")
 
     merge = _str(policy, "policy", "merge", "auto")
     if merge != "auto":
@@ -138,6 +160,7 @@ def load_config(root: Path) -> Config:
         if not isinstance(seat, dict):
             raise ConfigError(f"{CONFIG_NAME}: [seats.{name}] must be a table")
         where = f"seats.{name}"
+        _only(seat, where, "seat")
         seats.append(SeatConfig(name=name, adapter=_str(seat, where, "adapter", name),
                                 model=_str(seat, where, "model"), effort=_str(seat, where, "effort")))
 
@@ -156,6 +179,7 @@ def load_config(root: Path) -> Config:
         max_repair_rounds=_int(policy, "policy", "max_repair_rounds", 2),
         mutants=_int(policy, "policy", "mutants", 3),
         seats=tuple(seats),
+        exclusive_scope=_patterns(scopes, "exclusive", False),
     )
 
 

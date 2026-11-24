@@ -17,14 +17,14 @@
    "type": "checkout.created",
    "task": "clamp-001",
    "seat": "codex",
-   "path": "<folder-1>/clamp-001/<clone-1>"
+   "path": "<clone-1>"
   },
   {
    "ts": "<ts>",
    "type": "checkout.created",
    "task": "clamp-001",
    "seat": "claude",
-   "path": "<folder-1>/clamp-001/<clone-2>"
+   "path": "<clone-2>"
   },
   {
    "ts": "<ts>",

@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 462" width="960" height="462" role="img" aria-label="The life of one task: open, sealed readings, reveal, settlement, contract, braid, crossing, landing with a receipt.">
+<title>The life of one task: open, sealed readings, reveal, settlement, contract, braid, crossing, landing with a receipt.</title>
+<style>
+.s{font-family:'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif}.m{font-family:ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}
+
+@media (prefers-reduced-motion: reduce){*{animation:none!important}}
+</style>
+<rect width="960" height="462" rx="14" fill="#0c1726"/>
+<defs><marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 8 4 0 8z" fill="#8da2b9"/></marker></defs>
+<text x="28" y="44" class="s" font-size="20" fill="#e9eff6" text-anchor="start" font-weight="600" >One task, start to finish</text>
+<text x="28" y="66" class="s" font-size="13" fill="#8da2b9" text-anchor="start" font-weight="400" >The conductor is plain Python. It holds no model, does all the git work and runs every check.</text>
+<text x="28" y="140" class="s" font-size="13" fill="#c3d0de" text-anchor="start" font-weight="400" >builder</text>
+<text x="28" y="233.0" class="s" font-size="13" fill="#c3d0de" text-anchor="start" font-weight="400" >conductor</text>
+<text x="28" y="328" class="s" font-size="13" fill="#c3d0de" text-anchor="start" font-weight="400" >challenger</text>
+<line x1="104" y1="229.0" x2="844.5" y2="229.0" stroke="#2c4361" stroke-width="1.6" />
+<text x="156.5" y="96" class="s" font-size="12.5" fill="#8da2b9" text-anchor="middle" font-weight="400" >open</text>
+<text x="261.5" y="96" class="s" font-size="12.5" fill="#8da2b9" text-anchor="middle" font-weight="400" >sealed readings</text>
+<text x="366.5" y="96" class="s" font-size="12.5" fill="#8da2b9" text-anchor="middle" font-weight="400" >reveal</text>
+<text x="471.5" y="96" class="s" font-size="12.5" fill="#8da2b9" text-anchor="middle" font-weight="400" >settle</text>
+<text x="576.5" y="96" class="s" font-size="12.5" fill="#8da2b9" text-anchor="middle" font-weight="400" >contract</text>
+<text x="681.5" y="96" class="s" font-size="12.5" fill="#8da2b9" text-anchor="middle" font-weight="400" >braid</text>
+<text x="786.5" y="96" class="s" font-size="12.5" fill="#8da2b9" text-anchor="middle" font-weight="400" >crossing</text>
+<text x="891.5" y="96" class="s" font-size="12.5" fill="#8da2b9" text-anchor="middle" font-weight="400" >land</text>
+<rect x="109.5" y="206" width="94" height="46" rx="7" fill="#13243b" stroke="#2c4361"/>
+<text x="156.5" y="225.9" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >read task,</text>
+<text x="156.5" y="240.4" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >assign roles</text>
+<line x1="261.5" y1="158" x2="261.5" y2="300" stroke="#2c4361" stroke-width="1.4" />
+<circle cx="261.5" cy="229.0" r="3.5" fill="#8da2b9"/>
+<rect x="214.5" y="112" width="94" height="46" rx="7" fill="#13243b" stroke="#f5b041"/>
+<text x="261.5" y="131.9" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >its reading,</text>
+<text x="261.5" y="146.4" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >alone</text>
+<rect x="214.5" y="300" width="94" height="46" rx="7" fill="#13243b" stroke="#5cc8f2"/>
+<text x="261.5" y="319.9" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >its reading,</text>
+<text x="261.5" y="334.4" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >alone</text>
+<line x1="366.5" y1="158" x2="366.5" y2="300" stroke="#2c4361" stroke-width="1.4" />
+<circle cx="366.5" cy="229.0" r="3.5" fill="#8da2b9"/>
+<rect x="319.5" y="112" width="94" height="46" rx="7" fill="#13243b" stroke="#f5b041"/>
+<text x="366.5" y="131.9" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >reviews the</text>
+<text x="366.5" y="146.4" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >other reading</text>
+<rect x="319.5" y="300" width="94" height="46" rx="7" fill="#13243b" stroke="#5cc8f2"/>
+<text x="366.5" y="319.9" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >reviews the</text>
+<text x="366.5" y="334.4" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >other reading</text>
+<rect x="424.5" y="206" width="94" height="46" rx="7" fill="#13243b" stroke="#2c4361"/>
+<text x="471.5" y="233.1" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >settlement</text>
+<rect x="529.5" y="206" width="94" height="46" rx="7" fill="#13243b" stroke="#2c4361"/>
+<text x="576.5" y="225.9" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >contract</text>
+<text x="576.5" y="240.4" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >frozen + hashed</text>
+<line x1="681.5" y1="158" x2="681.5" y2="300" stroke="#2c4361" stroke-width="1.4" />
+<circle cx="681.5" cy="229.0" r="3.5" fill="#8da2b9"/>
+<rect x="634.5" y="112" width="94" height="46" rx="7" fill="#13243b" stroke="#f5b041"/>
+<text x="681.5" y="131.9" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >the change</text>
+<text x="681.5" y="146.4" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >+ mutants</text>
+<rect x="634.5" y="300" width="94" height="46" rx="7" fill="#13243b" stroke="#5cc8f2"/>
+<text x="681.5" y="319.9" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >probes, from</text>
+<text x="681.5" y="334.4" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >the contract</text>
+<rect x="739.5" y="206" width="94" height="46" rx="7" fill="#13243b" stroke="#2c4361"/>
+<text x="786.5" y="225.9" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >probes x change</text>
+<text x="786.5" y="240.4" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >probes x mutants</text>
+<rect x="844.5" y="206" width="94" height="46" rx="7" fill="#13243b" stroke="#e9eff6"/>
+<text x="891.5" y="225.9" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >main moves,</text>
+<text x="891.5" y="240.4" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >with a receipt</text>
+<rect x="424.5" y="112" width="94" height="46" rx="7" fill="none" stroke="#e9eff6" stroke-dasharray="4 3"/>
+<text x="471.5" y="131.9" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >you: a card,</text>
+<text x="471.5" y="146.4" class="s" font-size="11.5" fill="#e9eff6" text-anchor="middle" font-weight="400" >only on a split</text>
+<line x1="471.5" y1="158" x2="471.5" y2="206" stroke="#e9eff6" stroke-width="1.2" stroke-dasharray="4 3" />
+<text x="314.0" y="368" class="s" font-size="11.5" fill="#8da2b9" text-anchor="middle" font-weight="400" >hashes sealed before either is shown</text>
+<text x="681.5" y="368" class="s" font-size="11.5" fill="#8da2b9" text-anchor="middle" font-weight="400" >neither sees the other&#x27;s files</text>
+<path d="M786.5 252 V398 H681.5 V376" fill="none" stroke="#8da2b9" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#a)"/>
+<text x="734.0" y="418" class="s" font-size="11.5" fill="#8da2b9" text-anchor="middle" font-weight="400" >a failing probe or a surviving mutant goes back as evidence:</text>
+<text x="734.0" y="433" class="s" font-size="11.5" fill="#8da2b9" text-anchor="middle" font-weight="400" >each seat concedes and repairs, or contests. At most two rounds.</text>
+<text x="28" y="402" class="s" font-size="12.5" fill="#c3d0de" text-anchor="start" font-weight="400" >Roles swap every task.</text>
+<text x="28" y="419" class="s" font-size="12.5" fill="#c3d0de" text-anchor="start" font-weight="400" >Seats never message each other.</text>
+</svg>

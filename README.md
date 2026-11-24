@@ -1,103 +1,154 @@
-# Parallax
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="Parallax: one model builds, the other checks blind, and where their lines cross is the evidence." width="100%">
+</p>
 
-Claude Code and Codex each wrote a proposal without seeing the other's, then each reviewed the other's, and they arrived at the same core independently. The core: two different models make less correlated mistakes than two copies of one model, so each task is split into two sides. One agent builds it while the other, without seeing the code, writes the checks that will judge it. When they agree, that is evidence; when they disagree, that is either a bug or a hole in the spec, and it is the only thing that goes to the human.
+Parallax pairs Claude Code and Codex on every change. One builds it. The other, without seeing the code, writes the checks that will judge it. When they agree, the change lands on `main` with a receipt saying who built it, who challenged it and what was checked. When they disagree, you get one card with both answers and the concrete case that tells them apart.
 
-Parallax is the plain-Python conductor that runs this. It contains no model: it drives `claude -p` and `codex exec` as "seats", does all the git work, runs every check, and lands the result on `main` with a receipt.
+The conductor that runs this is plain Python with no model inside. It drives `claude -p` and `codex exec`, does all the git work, runs every check, and spends no tokens of its own.
 
-Design: `docs/superpowers/specs/2026-11-16-parallax-design.md`.
+Jump to [see it run](#see-it-run), [what real models did](#what-real-models-did), [use it on a project](#use-it-on-a-project), or the [documentation](docs/README.md).
 
-## Requirements
+## The idea
 
-- Windows 11 (the target; nothing here is tested elsewhere)
-- Python 3.12, standard library only
-- git, with a user name and email set
-- Claude Code and Codex CLIs, both signed in (only for real runs; the stub demo needs neither)
+A model that reviews its own work shares its own blind spots. Two different models make less correlated mistakes than two copies of one. So Parallax does not split a project between two agents. It splits every task into two sides:
 
-## Install
+- The **builder** writes the change, plus a few deliberately broken copies of it called mutants.
+- The **challenger** writes the probes from a frozen contract alone. It never sees the builder's files.
 
-From this checkout, install it into the Python you will run it with:
+Then the two meet for the first time, at the **crossing**: the probes must pass on the change and fail on every mutant. A green run counts only because the checks were written blind and shown able to fail.
+
+Agreement is evidence. Disagreement is the valuable output: it is either a bug or a hole in the spec, and it is the only thing that reaches you.
+
+<p align="center">
+  <img src="docs/assets/flow.svg" alt="The life of one task: open, sealed readings, reveal, settlement, contract, braid, crossing, and landing with a receipt. The builder and the challenger work in separate lanes; the conductor sits between them." width="100%">
+</p>
+
+Roles swap every task, so each model spends half its time being checked by the other. More in [The life of a task](docs/life-of-a-task.md).
+
+## See it run
+
+The stub demo needs neither CLI and spends nothing. Scripted seats disagree about one deliberately underspecified task: `clamp(x, lo, hi)`, which says nothing about `lo > hi`.
 
 ```powershell
 python -m pip install -e .
 ```
 
-That gives `python -m parallax` (and a `parallax` command) from any folder. Without installing, `python -m parallax` works only from this checkout, or with `PYTHONPATH` set to it.
-
-## Try it without spending anything
-
 ```powershell
 python -m parallax demo --stub
 ```
 
-This builds a throwaway git project in a new folder under the state home, `~/.parallax/demos/` (printed first), with one deliberately underspecified task: `clamp(x, lo, hi)`, which says nothing about `lo > hi`. Scripted seats disagree about it, so the run stops with a ruling card and exit code 2. The card shows both answers, each seat's reason, and a concrete call on which the answers differ. Rule on it with the command the run prints (`a` or `b`; the scripted seats cannot carry out an `other` ruling), then run the demo again on the same folder:
+<p align="center">
+  <img src="docs/assets/terminal.svg" alt="Terminal replay: both seats seal their readings, they disagree about lo greater than hi, a ruling card shows both answers and a witness call, the human rules, and the task lands with 3 of 3 mutants caught." width="100%">
+</p>
 
-```powershell
-python -m parallax rule D-clamp-001-1 a --repo "<printed folder>"
-python -m parallax demo --dir "<printed folder>" --stub
-```
+The run stops with a card and exit code 2. Rule on it with the command the run prints, run the demo again on the same folder, and the change lands with its receipt. The replay above is condensed from the demo's real output: the folder arguments are cut and the card is folded to fit.
 
-The second run lands the change on `main` and prints the receipt. Use `--dir PATH` to choose the folder yourself. Without `--stub`, the demo uses the real CLIs and spends tokens on both subscriptions.
+Drop `--stub` and the same demo runs on the real CLIs, spending tokens on both subscriptions.
 
-## Use it on a project
+## What real models did
 
-From the project's folder, or from anywhere with `--repo PATH` on each command (a relative task path is then read from the project, not the current folder):
+Three runs of the demo task with real seats, on one Windows 11 machine. Nothing here is a benchmark; it is what happened, with dates.
 
-1. `python -m parallax init` writes `parallax.toml` and `.parallax/`. Edit `parallax.toml`: the `check` and `lint` commands, the paths each role may write (`[scopes]`), and the two seats. Commit these files.
-2. Write the task as a short spec in `tasks/<id>.md`. The id is the file name without `.md`. A task is a behavior change unless its first line is `Kind: chore`.
-3. `python -m parallax run tasks/<id>.md` runs or resumes the task until it lands, needs a ruling, or is blocked. Exit codes: 0 landed, 2 needs a ruling, 3 parked, blocked or dropped, 1 error.
-4. When it needs a ruling it prints one card per open question, each ending with the command that answers it. `python -m parallax rule <dispute> a|b|other|drop` records your answer; a card accepts only the choices it lists. `other` takes your own answer in `--note`. `--scope task|project` overrides whether the answer binds later tasks, `--while` states the condition under which it holds, and `--limitation` accepts the change with a stated limitation, which is written on the receipt. Each card takes one ruling. Then run the same task again.
-5. `python -m parallax status` lists tasks and what each waits on.
+<p align="center">
+  <img src="docs/assets/evidence.svg" alt="Three real runs: four rulings before the settlement step, none after it on the same task, and one ruling on a task written to contradict itself. Every run landed with 3 of 3 mutants caught." width="100%">
+</p>
 
-Project-scoped rulings are kept as precedents in `.parallax/PRECEDENTS.md` and included in later briefs, so a settled question is not asked again while its conditions hold. A ruling on a behavior question is project-scoped by default; a ruling that chooses an interface, or replaces several provisions at once, applies to its task only.
+| Run | Builder / challenger | What the models did | Asked of the human | Result |
+|---|---|---|---|---|
+| 2026-11-17 | Codex / Claude | Agreed that `lo > hi` raises, split on four other reading questions | Four rulings | Landed, `ruled`: 90 probes, 3 of 3 mutants caught |
+| 2026-11-23 | Codex / Claude | Codex objected to five of Claude's nine decisions; the seats flagged ten conflicts, then settled them in one exchange | Nothing | Landed in about ten minutes, `consensus`: 84 probes, 3 of 3 mutants caught |
+| 2026-11-23 | Claude / Codex | Task written to contradict itself. The challenger refused the builder's proposal over one dropped guarantee | One card | Landed after one failed crossing and a repair, `ruled`: 108 probes, 3 of 3 mutants caught |
+
+The first run asked four questions that were largely one question. That finding produced the settlement step: when the seats disagree in several places, they get one more exchange before you do, and only a choice where each still holds a different answer becomes a card. The second run is the same task after that change.
+
+The full account, including token use and what has only run on stub seats, is in [Field notes](docs/field-notes.md).
+
+## Every commit carries its receipt
+
+<p align="center">
+  <img src="docs/assets/receipt.svg" alt="A landing commit's trailers: Parallax-Task, Parallax-Contract hash, Built-by codex, Challenged-by claude, Checks 84 probes passed and 3 of 3 mutants caught, Verdict consensus. Beside it, the five verdicts and what each means." width="100%">
+</p>
+
+The receipt is the trailers of the landing commit, so `git log` is the audit trail. Main never receives a failing check. The decisions behind each receipt (readings, contract, attempts, crossings, rulings) travel with the code in `.parallax/ledger.jsonl`. More in [Receipts and the ledger](docs/receipts.md).
 
 ## How a disagreement reaches you
 
-Each seat first writes its reading of the task alone: the interface it expects and an answer to every open choice. Then each reviews the other's reading. Where a seat objects, it must give a concrete case and say what each answer does there. What happens next depends on how much they disagree:
+<p align="center">
+  <img src="docs/assets/routes.svg" alt="Four routes from the reveals: nothing in dispute means no card; one objection means one card; several objections or a conflict get one more exchange and a card only where each seat holds a different answer; a refused proposal means one card to replace or drop." width="100%">
+</p>
 
-- **Nothing in dispute:** the contract is frozen and the build starts. You are not asked.
-- **One objection:** it becomes one card, with both answers, both reasons and the case that tells them apart.
-- **Several objections, or a seat says two provisions conflict:** these are often one question asked several times, so the seats get one more exchange before you do. The builder proposes a single account of the whole task: what both already agree on, and each remaining choice with its two answers. The challenger reviews exactly that proposal. Where both sign the same answer it stands, and where both would accept either, the builder's preference stands. Only a choice where each holds a different answer becomes a card, and one card can cover several provisions.
-- **A seat refuses the proposal:** if both agree on which provisions a ruling would have to replace, you get one card that asks for the replacement text (`other`) or lets you `drop` the task. If they cannot agree on that boundary, the task is blocked and `status` says why; no card is offered.
+A card shows both answers, each seat's reason, and a witness: a concrete call on which the answers differ. Opinions do not open disputes; evidence does. The conductor never waits at a prompt. It writes the card, prints it and exits, and `parallax rule` records your answer. A ruling scoped to the project becomes a precedent, so a settled question is not asked again while its conditions hold. More in [Rulings and precedents](docs/rulings.md).
 
-The settlement is recorded once, before any card can be ruled, and every later step reads that record. Nothing is built until every card is ruled and the contract is frozen from the result.
+## Use it on a project
 
-A task that was opened by an earlier version of Parallax finishes under the rules it was opened with: one card per objection.
+From the project's folder:
 
-## What a receipt means
+1. `python -m parallax init` writes `parallax.toml` and `.parallax/`. Set the `check` and `lint` commands, the paths each role may write, and the two seats. Commit them.
+2. Write the task as a short spec in `tasks/<id>.md`.
+3. `python -m parallax run tasks/<id>.md` runs or resumes the task until it lands, needs a ruling, or is blocked.
+4. When it prints a card, answer with `python -m parallax rule <dispute> a|b|other|drop`, then run the same task again.
+5. `python -m parallax status` lists tasks and what each waits on.
 
-A landing commit carries trailers: `Parallax-Task`, `Parallax-Contract`, `Built-by`, `Challenged-by`, `Checks`, `Verdict`, and `Limitation` when there is one. A chore's receipt has no contract and no challenger, so it omits `Parallax-Contract` and `Challenged-by`. The verdict is one of:
+A run can be interrupted at any step. Every step records its completion, and the next `run` works out where it stopped.
 
-- `consensus`: clean at the first crossing.
-- `resolved`: the seats settled a dispute between themselves.
-- `ruled`: a human ruling was needed.
-- `limited`: accepted with a stated limitation, which is written on the receipt.
-- `solo`: not pair-verified (a chore, built by one seat).
+Reference: [commands](docs/cli.md) and [parallax.toml](docs/configuration.md).
 
-Main never receives a failing check.
+### Requirements
 
-Every landed seat change matched its accepted inventory; relevance is not independently reviewed.
+- Windows 11. It is the target, and nothing here is tested elsewhere.
+- Python 3.12. Standard library only: there are no dependencies to install.
+- git, with a user name and email set.
+- Claude Code and Codex CLIs, both signed in, for real runs. The stub demo and the test suite need neither.
 
 ## How the blind is kept
 
-The blind is enforced where each CLI can enforce it and audited everywhere. Seats are treated as fallible, not hostile.
+<p align="center">
+  <img src="docs/assets/blind.svg" alt="Your project on the left, the conductor in the middle, and a private state folder on the right holding claude's clone and codex's clone, separated, plus the crossing area that only the conductor uses." width="100%">
+</p>
 
-- **Placement:** each seat works in its own clone of the project, with no git link to the other's, under a random name in the state folder (`PARALLAX_HOME`, else `~/.parallax`), outside the repo.
-- **Confinement:** each task's folder in the state folder is made private to the human's account, SYSTEM and Administrators; Codex runs in its `workspace-write` sandbox and Claude gets file tools restricted to its own folder and no shell.
-- **Seal:** readings and attempts are hashed into the ledger before the reveal, so nothing can be adjusted afterwards.
-- **Audit:** after each call the conductor scans the seat's event stream for any path belonging to the other seat or to the state folder; this is best effort.
-- **Voiding:** a hit voids the attempt, together with its session and clone, and the rerun is a new session in a new clone, starting from the contract alone.
+Each seat works in its own clone, under a random name, in a state folder outside your repo that is private to your account. Codex runs in its sandbox; Claude gets file tools restricted to its folder and no shell. Readings and attempts are hashed before anything is revealed. After every call the conductor scans the seat's event stream for the other seat's paths, and a hit voids the attempt along with its session and clone. More in [Keeping the blind](docs/blind.md).
 
-## What is and is not verified
+## What it does not claim
 
-The spec's section "Verified and not yet verified" records what the real CLIs did on this machine, with the dates. `scripts/probes/seat_smoke.py` reproduces it and exits non-zero if any expectation fails; rerun it, and `scripts/probes/job_object_seats.py`, when either CLI updates. The test suite runs on scripted stub seats and spends nothing:
+- The audit is best effort. Seats are treated as fallible, not hostile: a script that read the other clone without naming it would get past the scan.
+- A receipt says every landed change matched its accepted inventory of files. It does not say an independent reviewer judged each file relevant.
+- It runs one task at a time, with two seats, on Windows.
+- An A/B card, the direct settlement path and a run killed mid-step have so far run only on stub seats, not with real models.
+- The committed ledger of a task landed before 2026-11-23 records each seat clone's full path, home folder included. Newer records hold only the clone's folder name. Check an older project's `.parallax/ledger.jsonl` before publishing it.
+
+## How it was built
+
+Parallax was designed the way it works. Claude Code and Codex each wrote a proposal without seeing the other's, then each reviewed the other's. They arrived at the same core independently, which is the main reason to trust it. The [design document](docs/superpowers/specs/2026-11-16-parallax-design.md) records which decisions were the human's rulings and which were the agents' proposals, and keeps a dated list of what has been verified on a real machine and what has not.
+
+- About 6,200 lines of Python, standard library only.
+- 407 tests run the conductor's every branch on scripted stub seats, spending nothing: disagreement, each settlement path, ruling, failed crossing, surviving mutant, repair, voided attempt, and resuming after an interruption at each step.
+- `scripts/probes/seat_smoke.py` reproduces what the real CLIs were observed to do and exits non-zero if any expectation fails. It is rerun whenever either CLI updates.
 
 ```powershell
 python -m unittest discover -s tests -t . -v
 ```
 
-Only `tests/test_live_seats.py` uses the real CLIs, and only when `PARALLAX_LIVE=1`. The stub suite proves the conductor's branches (disagreement, each settlement path, ruling, failed crossing, surviving mutant, repair, voided attempt, and resuming after an interruption at each step). That the real CLIs can carry one task to a receipt is shown by running `python -m parallax demo`, which reports which path it took. The first real run, on 2026-11-17, took the dispute path: the two models agreed that `lo > hi` raises `ValueError` but split on four other reading questions (inclusive bounds, `lo == hi`, accepted types, NaN bounds). After four rulings it landed at the first crossing with verdict `ruled`: 90 probes passed and 3 of 3 mutants were caught.
+More in [Architecture](docs/architecture.md).
 
-That run asked four separate questions that were largely one question about the bounds, which is what the settlement described above was built to fix. The first real run with the settlement, on 2026-11-23 (Codex CLI 0.170.0 building, Claude Code 2.1.311 challenging), took the confirmed-batch path and asked nothing. Codex objected to five of Claude's nine reading decisions and the two seats flagged ten conflicts between provisions. Codex proposed one account of the task in seven common terms with no choice left open; Claude attested it. The contract froze with no card, and the task landed at the first crossing in about ten minutes with verdict `consensus`: 84 probes passed and 3 of 3 mutants were caught. A second real run that day, with the roles rotated and a task written to contradict itself, took the refusal path: the challenger refused the builder's proposal over one dropped guarantee, the human answered one card with a replacement interface and policy, and the task landed after one failed crossing and a repair, with verdict `ruled` (108 probes, 3 of 3 mutants). An A/B card, the direct path and a run killed mid-step have run only on stub seats. The spec's "Verified and not yet verified" has the details of both runs, including a suspected overcount in the recorded token totals.
+## Documentation
+
+| | |
+|---|---|
+| [Concepts](docs/concepts.md) | Why two models, and the dozen terms everything else uses |
+| [The life of a task](docs/life-of-a-task.md) | The nine steps from a spec file to a commit on main |
+| [Rulings and precedents](docs/rulings.md) | Cards, how to answer them, and how answers persist |
+| [Receipts and the ledger](docs/receipts.md) | What a receipt says and what the ledger keeps |
+| [Keeping the blind](docs/blind.md) | Placement, confinement, seal, audit and voiding |
+| [Commands](docs/cli.md) | Every command, flag and exit code |
+| [parallax.toml](docs/configuration.md) | Every key, with a full example |
+| [Architecture](docs/architecture.md) | Module map, state on disk, seat adapters, tests |
+| [Field notes](docs/field-notes.md) | The real runs, what they cost and what they changed |
+| [FAQ](docs/faq.md) | Short answers to the first questions |
+| [Design document](docs/superpowers/specs/2026-11-16-parallax-design.md) | The original design, its rulings, and what is verified |
+
+## Status
+
+v0: one task end to end, with real seats, from one command. Next on the list: two or more tasks in flight with crossed roles, experiments as a dispute step, assumptions as first-class claims that can be flipped and rerun, a scoreboard of which seat should build what, a live view, and more seats.
 
 ## License
 

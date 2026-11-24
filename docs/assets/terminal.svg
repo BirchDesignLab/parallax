@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 548" width="960" height="548" role="img" aria-label="Terminal replay of the stub demo: the seats disagree about lo &gt; hi, a ruling card is printed, the human rules, the task lands.">
+<title>Terminal replay of the stub demo: the seats disagree about lo &gt; hi, a ruling card is printed, the human rules, the task lands.</title>
+<style>
+.s{font-family:'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif}.m{font-family:ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}
+.l0{animation:k0 30.0s linear infinite}@keyframes k0{0%,2.00%{opacity:0}2.60%,96%{opacity:1}100%{opacity:0}}
+.l1{animation:k1 30.0s linear infinite}@keyframes k1{0%,5.67%{opacity:0}6.27%,96%{opacity:1}100%{opacity:0}}
+.l2{animation:k2 30.0s linear infinite}@keyframes k2{0%,7.50%{opacity:0}8.10%,96%{opacity:1}100%{opacity:0}}
+.l3{animation:k3 30.0s linear infinite}@keyframes k3{0%,9.33%{opacity:0}9.93%,96%{opacity:1}100%{opacity:0}}
+.l4{animation:k4 30.0s linear infinite}@keyframes k4{0%,11.17%{opacity:0}11.77%,96%{opacity:1}100%{opacity:0}}
+.l5{animation:k5 30.0s linear infinite}@keyframes k5{0%,13.00%{opacity:0}13.60%,96%{opacity:1}100%{opacity:0}}
+.l6{animation:k6 30.0s linear infinite}@keyframes k6{0%,14.83%{opacity:0}15.43%,96%{opacity:1}100%{opacity:0}}
+.l7{animation:k7 30.0s linear infinite}@keyframes k7{0%,16.67%{opacity:0}17.27%,96%{opacity:1}100%{opacity:0}}
+.l9{animation:k9 30.0s linear infinite}@keyframes k9{0%,20.17%{opacity:0}20.77%,96%{opacity:1}100%{opacity:0}}
+.l10{animation:k10 30.0s linear infinite}@keyframes k10{0%,22.00%{opacity:0}22.60%,96%{opacity:1}100%{opacity:0}}
+.l11{animation:k11 30.0s linear infinite}@keyframes k11{0%,23.83%{opacity:0}24.43%,96%{opacity:1}100%{opacity:0}}
+.l12{animation:k12 30.0s linear infinite}@keyframes k12{0%,25.67%{opacity:0}26.27%,96%{opacity:1}100%{opacity:0}}
+.l14{animation:k14 30.0s linear infinite}@keyframes k14{0%,29.17%{opacity:0}29.77%,96%{opacity:1}100%{opacity:0}}
+.l15{animation:k15 30.0s linear infinite}@keyframes k15{0%,32.83%{opacity:0}33.43%,96%{opacity:1}100%{opacity:0}}
+.l16{animation:k16 30.0s linear infinite}@keyframes k16{0%,34.67%{opacity:0}35.27%,96%{opacity:1}100%{opacity:0}}
+.l17{animation:k17 30.0s linear infinite}@keyframes k17{0%,38.33%{opacity:0}38.93%,96%{opacity:1}100%{opacity:0}}
+.l18{animation:k18 30.0s linear infinite}@keyframes k18{0%,40.17%{opacity:0}40.77%,96%{opacity:1}100%{opacity:0}}
+.l19{animation:k19 30.0s linear infinite}@keyframes k19{0%,42.00%{opacity:0}42.60%,96%{opacity:1}100%{opacity:0}}
+.l20{animation:k20 30.0s linear infinite}@keyframes k20{0%,43.83%{opacity:0}44.43%,96%{opacity:1}100%{opacity:0}}
+.l21{animation:k21 30.0s linear infinite}@keyframes k21{0%,45.67%{opacity:0}46.27%,96%{opacity:1}100%{opacity:0}}
+@media (prefers-reduced-motion: reduce){*{animation:none!important}}
+</style>
+<rect width="960" height="548" rx="14" fill="#0c1726"/>
+<rect x="0.5" y="0.5" width="959" height="547" rx="14" fill="none" stroke="#2c4361"/>
+<line x1="0" y1="40" x2="960" y2="40" stroke="#2c4361" stroke-width="1" />
+<circle cx="24" cy="20" r="5" fill="#2c4361"/>
+<circle cx="42" cy="20" r="5" fill="#2c4361"/>
+<circle cx="60" cy="20" r="5" fill="#2c4361"/>
+<text x="480.0" y="25" class="s" font-size="12.5" fill="#8da2b9" text-anchor="middle" font-weight="400" >the stub demo: no tokens spent</text>
+<text class="m l0" x="30" y="64" font-size="13.5" fill="#e9eff6" font-weight="600" xml:space="preserve"><tspan fill="#8da2b9">$ </tspan>python -m parallax demo --stub</text>
+<text class="m l1" x="30" y="85" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: opened (behavior); builder codex, challenger claude</text>
+<text class="m l2" x="30" y="106" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: claude&#x27;s reading sealed</text>
+<text class="m l3" x="30" y="127" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: codex&#x27;s reading sealed</text>
+<text class="m l4" x="30" y="148" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: claude&#x27;s reveal done</text>
+<text class="m l5" x="30" y="169" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: codex&#x27;s reveal done</text>
+<text class="m l6" x="30" y="190" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: settlement published (direct)</text>
+<text class="m l7" x="30" y="211" font-size="13.5" fill="#e9eff6" font-weight="600" xml:space="preserve">clamp-001: needs a ruling on D-clamp-001-1</text>
+<text class="m l9" x="30" y="253" font-size="13.5" fill="#e9eff6" font-weight="400" xml:space="preserve">Dispute D-clamp-001-1 (reading)    What if lo &gt; hi?</text>
+<text class="m l10" x="30" y="274" font-size="13.5" fill="#5cc8f2" font-weight="400" xml:space="preserve">  a) codex (builder):      raise ValueError</text>
+<text class="m l11" x="30" y="295" font-size="13.5" fill="#f5b041" font-weight="400" xml:space="preserve">  b) claude (challenger):  swap the bounds</text>
+<text class="m l12" x="30" y="316" font-size="13.5" fill="#e9eff6" font-weight="400" xml:space="preserve">  witness: clamp(5, 10, 1)   a raises ValueError, b returns 5</text>
+<text class="m l14" x="30" y="358" font-size="13.5" fill="#e9eff6" font-weight="600" xml:space="preserve"><tspan fill="#8da2b9">$ </tspan>python -m parallax rule D-clamp-001-1 a</text>
+<text class="m l15" x="30" y="379" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">recorded D-clamp-001-1: a</text>
+<text class="m l16" x="30" y="400" font-size="13.5" fill="#e9eff6" font-weight="600" xml:space="preserve"><tspan fill="#8da2b9">$ </tspan>python -m parallax demo --stub</text>
+<text class="m l17" x="30" y="421" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: contract v1 frozen</text>
+<text class="m l18" x="30" y="442" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: codex&#x27;s build 1 finished</text>
+<text class="m l19" x="30" y="463" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: claude&#x27;s probe 1 finished</text>
+<text class="m l20" x="30" y="484" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: crossing 1: check passed, 3 of 3 mutants caught</text>
+<text class="m l21" x="30" y="505" font-size="13.5" fill="#e9eff6" font-weight="600" xml:space="preserve">clamp-001: landed 1a0a4035f05a   Verdict: ruled</text>
+</svg>

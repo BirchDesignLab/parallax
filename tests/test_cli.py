@@ -46,6 +46,16 @@ class Cli(unittest.TestCase):
         code, _, err = call("status", "--repo", tempfile.mkdtemp(prefix="plx empty "))
         self.assertEqual(code, 1); self.assertIn("parallax.toml", err)
 
+    def test_a_usage_error_exits_1_so_that_2_only_ever_means_a_ruling_is_needed(self):
+        for argv in (["rule", "D-x-1", "maybe"], ["frobnicate"], ["run"]):
+            with self.subTest(argv=argv), self.assertRaises(SystemExit) as stop:
+                call(*argv)
+            self.assertEqual(stop.exception.code, 1)
+
+    def test_a_missing_task_file_is_an_error_message_not_a_traceback(self):
+        code, _, err = call("run", "tasks/nope.md", *self.repo)
+        self.assertEqual(code, 1); self.assertIn("parallax: file not found:", err); self.assertIn("nope.md", err)
+
     def test_blocked_exits_3(self):
         self.stubs["codex"].script["reading"] = [lambda r: {}] * 2
         code, out, _ = call("run", str(self.root / "tasks/clamp-001.md"), *self.repo)

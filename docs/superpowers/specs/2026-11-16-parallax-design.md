@@ -2,6 +2,8 @@
 
 Date: 2026-11-16. Status: draft for the human's approval. Codex read it cold and withheld its signature on one condition, which has been adopted. Nothing is built yet.
 
+Status, 2026-11-23: v0 is built and has landed real tasks (see "Verified and not yet verified"). The sections below are the design as written and amended. Where the code has since moved away from this text, "Where the code differs from this document" lists it, and the pages under `docs/` describe the code.
+
 ## What was asked
 
 > let's cook up a generic framework to allow claude code and chatgpt codex to collaborate on projects in parallel. we're going to start in this folder and may keep it local unless we come up with something brilliant.
@@ -42,7 +44,7 @@ Ways this could run and still be a failure:
 ## Constraints
 
 - One Windows 11 machine, one human. Codex CLI 0.160.0, Claude Code 2.1.308, Python 3.12, git.
-- Local only for now: no remote, no publishing.
+- Local only for now: no remote, no publishing. (This was about the framework's own repository, which was published on 2026-11-23. The conductor itself still never pushes: it moves `main` in the project's own repository.)
 - The framework's own code lives in this folder. Projects it runs on are separate folders that contain a `parallax.toml`.
 - Seats run headless: `codex exec` and `claude -p`. Neither can stop to ask permission.
 - Codex's sandbox limits where an agent writes, not what it reads. The operating system cannot keep one agent from reading the other's work, so blindness has to be arranged and audited (see "Keeping the blind honest").
@@ -292,6 +294,43 @@ What this run showed about the design: a refusal over one narrow omission cost t
 Not yet run on real seats: a settlement that leaves an A/B card, the direct path, and a run killed mid-step and resumed. The stub suite covers each.
 
 Not yet verified: nothing the design relies on. Rerun the probe when either CLI updates; it exits non-zero if any expectation fails.
+
+## Where the code differs from this document
+
+Recorded 2026-11-23, while the reference pages under `docs/` were written against the code. The code is the authority in each case. Four entries were gaps and were fixed the same day; they are kept here, marked, because the text above still reads the old way or says nothing.
+
+**Gaps, fixed 2026-11-23**
+
+1. **The ledger recorded absolute clone paths.** Each `checkout.created` event stored the seat clone's full path, and landing moves a task's events into `.parallax/ledger.jsonl`, which is committed, so a project's ledger carried a path under the human's home folder. Fixed: the event records the clone's folder name and the conductor resolves it against the task's state folder; audit hits in `reading.voided`, `attempt.voided` and a `seat.failed` raised by the audit are recorded relative to that folder. Events written earlier keep the full path and still read. No brief or card ever showed a seat that path, so the blind was not affected.
+2. **`exclusive` did not exclude.** The code only added the `exclusive` patterns to the builder's scope, so a path matched by both `challenger` and `exclusive` could be written by either seat. Fixed: a challenger attempt that changes a path `exclusive` matches is rejected (`you changed files reserved for the builder`). The `builder` and `challenger` lists themselves are still not checked for overlap.
+
+**Seats and adapters**
+
+3. **The `stub` adapter is not a config option.** "Seats" calls it a third adapter. Only `claude` and `codex` are registered. `stub` is registered for the length of `parallax demo --stub` and by the tests; `adapter = "stub"` in a project's `parallax.toml` fails with an unknown-adapter error.
+4. **Config keys this document does not show.** `[project]` also reads `check_timeout` (seconds, default 600, used for `check` and `lint`), `seat_timeout` (default 1800) and `count_pattern` (a regular expression that reads the probe count from the check's output; the default matches unittest's "Ran N tests" line). Each `[seats.<name>]` table also reads `adapter`, which defaults to the seat's name. `[policy] merge` accepts only `"auto"` and `pair` only `"behavior"`; any other value is an error. An unknown table or key was ignored without a warning; fixed 2026-11-23, it is now an error that names the key.
+
+**Keeping the blind honest**
+
+5. **What the audit scans for.** The text says any path belonging to the other seat or to the state folder. The code scans for the other seat's clones and for four of the conductor's folders inside the task's folder: `cross`, `land`, `mutants` and `artifacts`. The task's folder as a whole cannot be forbidden, because the seat's own clone sits in it.
+6. **What the privacy check checks.** Before every seat call the conductor checks that the task's folder is still private, and blocks the task if it is not. It does not check the other seat's clone separately; that clone inherits the folder's permissions.
+7. **What voiding covers.** A hit voids a reading, a build, a probe or a repair. A hit during a reveal, a settlement proposal or review, or a chore blocks the task instead. A second void of the same step blocks the task. A repair voided after a crossing restarts in a new clone at the seat's last accepted commit with a new session, not from the contract alone.
+8. **The seal.** "Hashed into the ledger before reveal" compresses two things. A reading's hash is recorded before either reading is shown. An attempt is recorded as its commit and file inventory before the crossing. Both records are written to the journal and reach the ledger when the task lands.
+9. **What a seat learns of the other side.** Not only at steps 3 and 8: on the confirmed batch route the challenger's review brief at step 4 carries the builder's proposal.
+
+**The task**
+
+10. **An attempt that never finished.** "Discarded and rerun" means the seat's clone is reset and cleaned (`git reset --hard`, `git clean -fdx`) and the call runs again in the same clone and the same session. Only a voided attempt gets a new clone and a new session.
+11. **Precedents in briefs.** Not in every brief. The reading briefs carry them, and so does the contract, which the build and probe briefs include.
+12. **Default scopes of post-crossing rulings.** A ruling on a failed-check card defaults to project scope and so becomes a precedent. Rulings on a surviving-mutant card and on an unresolved card, and every `drop`, are task scope whatever `--scope` says.
+13. **A limitation before the contract.** A limitation given on a settlement card reaches the receipt but amends no contract. The contract gains "what is no longer promised" only for rulings made after the first freeze.
+14. **What the landing commit carries.** Besides the seats' changes and the task's ledger events: `.parallax/contracts/<task>.md`, and `.parallax/PRECEDENTS.md` regenerated. The `Limitation:` trailers follow `Verdict:`.
+15. **Older tasks.** The one-card-per-objection settlement still runs for tasks opened before the confirmed protocol, as step 4's last paragraph says.
+
+**Commands**
+
+16. **Task id.** The file name without its last extension, so `parser.v2.md` is task `parser.v2`. Letters, digits, `.`, `_` and `-`, starting with a letter or digit.
+17. **Exit code 2 had two meanings.** A task that needs a ruling exits 2, and so did a usage error from the argument parser. Fixed 2026-11-23: a usage error exits 1, and so does a task file that does not exist, which used to end in a traceback.
+18. **`run --builder SEAT`** chooses the builder when a task is first opened. It is not listed under "Commands".
 
 ## Left to the builder
 

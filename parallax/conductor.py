@@ -888,7 +888,7 @@ class Conductor:
 
         def void(request: SeatRequest, result: SeatResult, hits: list[str]) -> SeatRequest:
             # The contamination goes with the reading: its session and its clone.
-            self.journal.append("reading.voided", t.id, seat=seat, hits=hits)
+            self.journal.append("reading.voided", t.id, seat=seat, hits=self._named(t, hits))
             if result.session:
                 self.seats[seat].discard(result.session, request.cwd)
             self._remove_clone(t, seat, request.cwd)
@@ -1609,7 +1609,7 @@ class Conductor:
         voids = []
 
         def void(request: SeatRequest, result: SeatResult, hits: list[str]) -> SeatRequest:
-            self.journal.append("attempt.voided", t.id, n=n, role=role, seat=seat, hits=hits)
+            self.journal.append("attempt.voided", t.id, n=n, role=role, seat=seat, hits=self._named(t, hits))
             session = result.session or request.session
             if session:
                 self.seats[seat].discard(session, request.cwd)
@@ -1664,6 +1664,11 @@ class Conductor:
         outside = scopes.outside(changed, scope)
         if outside:
             reasons.append(f"you changed files outside your paths: {', '.join(outside)}")
+        if t.role(seat) == "challenger":
+            # `exclusive` paths are the builder's alone, even where a challenger pattern also matches.
+            reserved = [p for p in changed if p not in outside and scopes.matches(p, self.cfg.exclusive_scope)]
+            if reserved:
+                reasons.append(f"you changed files reserved for the builder: {', '.join(reserved)}")
         if mutants is not None:
             reasons.extend(validate_mutants(clone, clone / MUTANTS_DIR, mutants, self.cfg))
         if reasons:
@@ -1817,7 +1822,7 @@ class Conductor:
 
         def void(request: SeatRequest, result: SeatResult, hits: list[str]) -> SeatRequest:
             # As for an attempt, but the fresh clone starts at the seat's own last accepted commit.
-            self.journal.append("attempt.voided", t.id, n=n, role=role, seat=seat, hits=hits, stage="respond")
+            self.journal.append("attempt.voided", t.id, n=n, role=role, seat=seat, hits=self._named(t, hits), stage="respond")
             session = result.session or request.session
             if session:
                 self.seats[seat].discard(session, request.cwd)
@@ -2319,7 +2324,7 @@ class Conductor:
             hits = audit.forbidden_hits(result.events or "", forbidden)
             if hits:
                 if void is None:
-                    error = f"named the other seat's folder: {', '.join(hits)}"
+                    error = f"named the other seat's folder: {', '.join(self._named(t, hits))}"
                     self.journal.append("seat.failed", t.id, stage=request.stage, seat=seat, error=error)
                     raise _Stop(Outcome("blocked", t.id, f"{seat} failed at {request.stage}: {error}"))
                 request = void(request, result, hits)
@@ -2398,7 +2403,25 @@ class Conductor:
         path.write_text(text, encoding="utf-8", newline="\n")
 
     def _clones_of(self, t: _Task, seat: str) -> list[str]:
-        return [e["path"] for e in self.events(t.id) if e["type"] == "checkout.created" and e["seat"] == seat]
+        """Every clone recorded for `seat`, as full paths.
+
+        A checkout.created records the clone's folder name, which is resolved against the
+        task's state folder here: the ledger is committed, and a full path would publish the
+        human's home folder. Events written before 2026-11-23 hold the full path and still read.
+        """
+        return [str(Path(e["path"]) if Path(e["path"]).is_absolute() else t.dir / e["path"])
+                for e in self.events(t.id) if e["type"] == "checkout.created" and e["seat"] == seat]
+
+    @staticmethod
+    def _named(t: _Task, hits: Sequence[str]) -> list[str]:
+        """Audit hits as they are recorded: relative to the task's state folder, never a full path."""
+        names = []
+        for hit in hits:
+            try:
+                names.append(Path(hit).relative_to(t.dir).as_posix())
+            except ValueError:
+                names.append(Path(hit).name)
+        return names
 
     def _clone_of(self, t: _Task, seat: str) -> Path | None:
         clones = self._clones_of(t, seat)
@@ -2407,7 +2430,7 @@ class Conductor:
     def _new_clone(self, t: _Task, seat: str) -> Path:
         path = t.dir / f"{seat}-{secrets.token_hex(4)}"
         gitops.clone_at(self.cfg.root, path, t.base)
-        self.journal.append("checkout.created", t.id, seat=seat, path=str(path))
+        self.journal.append("checkout.created", t.id, seat=seat, path=path.name)
         return path
 
     def _remove_clone(self, t: _Task, seat: str, path: Path) -> None:
