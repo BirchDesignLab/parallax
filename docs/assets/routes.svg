@@ -1,37 +1,68 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 432" width="960" height="432" role="img" aria-label="Four routes from the reveals: no dispute, one objection, several objections or a conflict, and a refused proposal.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 740" width="960" height="740" role="img" aria-label="Four routes from the reveals: no dispute, one objection, several objections or a conflict, and a refused proposal.">
 <title>Four routes from the reveals: no dispute, one objection, several objections or a conflict, and a refused proposal.</title>
 <style>
-.s{font-family:'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif}.m{font-family:ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}
-
+.s{font-family:'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif}.m{font-family:'Cascadia Mono', ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}
+@keyframes draw{from{stroke-dashoffset:1.05}to{stroke-dashoffset:0}}
+@keyframes fade{from{opacity:0}}
+.d0 path{stroke-dasharray:1 2;animation:draw 0.8s cubic-bezier(.5,0,.2,1) 0.2s both}
+.d1 path{stroke-dasharray:1 2;animation:draw 0.8s cubic-bezier(.5,0,.2,1) 0.35s both}
+.d2 path{stroke-dasharray:1 2;animation:draw 0.8s cubic-bezier(.5,0,.2,1) 0.5s both}
+.d3 path{stroke-dasharray:1 2;animation:draw 0.8s cubic-bezier(.5,0,.2,1) 0.6499999999999999s both}
 @media (prefers-reduced-motion: reduce){*{animation:none!important}}
 </style>
-<rect width="960" height="432" rx="14" fill="#0c1726"/>
-<defs><marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 8 4 0 8z" fill="#8da2b9"/></marker></defs>
-<text x="28" y="44" class="s" font-size="20" fill="#e9eff6" text-anchor="start" font-weight="600" >How a disagreement reaches you</text>
-<text x="28" y="66" class="s" font-size="13" fill="#8da2b9" text-anchor="start" font-weight="400" >After the reveals, how much the seats disagree decides the route.</text>
-<circle cx="92" cy="221.0" r="5" fill="#e9eff6"/>
-<text x="92" y="245.0" class="s" font-size="12.5" fill="#8da2b9" text-anchor="middle" font-weight="400" >reveals</text>
-<path d="M92 221.0 C162 221.0 142 110 212 110" fill="none" stroke="#2c4361" stroke-width="1.5"/>
-<text x="224" y="106" class="s" font-size="13.5" fill="#e9eff6" text-anchor="start" font-weight="600" >nothing in dispute</text>
-<text x="224" y="124" class="s" font-size="12" fill="#8da2b9" text-anchor="start" font-weight="400" >the contract freezes</text>
-<line x1="644" y1="110" x2="706" y2="110" stroke="#2c4361" stroke-width="1.4" marker-end="url(#a)"/>
-<text x="718" y="115" class="s" font-size="13.5" fill="#8da2b9" text-anchor="start" font-weight="600" >no card</text>
-<path d="M92 221.0 C162 221.0 142 184 212 184" fill="none" stroke="#2c4361" stroke-width="1.5"/>
-<text x="224" y="180" class="s" font-size="13.5" fill="#e9eff6" text-anchor="start" font-weight="600" >one objection</text>
-<text x="224" y="198" class="s" font-size="12" fill="#8da2b9" text-anchor="start" font-weight="400" >both answers, both reasons, the case that splits them</text>
-<line x1="644" y1="184" x2="706" y2="184" stroke="#2c4361" stroke-width="1.4" marker-end="url(#a)"/>
-<text x="718" y="189" class="s" font-size="13.5" fill="#e9eff6" text-anchor="start" font-weight="600" >one card</text>
-<path d="M92 221.0 C162 221.0 142 258 212 258" fill="none" stroke="#2c4361" stroke-width="1.5"/>
-<text x="224" y="254" class="s" font-size="13.5" fill="#e9eff6" text-anchor="start" font-weight="600" >several, or two provisions conflict</text>
-<text x="224" y="272" class="s" font-size="12" fill="#8da2b9" text-anchor="start" font-weight="400" >one more exchange: the builder proposes one account,</text>
-<line x1="644" y1="258" x2="706" y2="258" stroke="#2c4361" stroke-width="1.4" marker-end="url(#a)"/>
-<text x="718" y="254" class="s" font-size="13.5" fill="#e9eff6" text-anchor="start" font-weight="600" >a card only where each</text>
-<text x="224" y="287" class="s" font-size="12" fill="#8da2b9" text-anchor="start" font-weight="400" >the challenger reviews exactly that</text>
-<text x="718" y="272" class="s" font-size="13.5" fill="#e9eff6" text-anchor="start" font-weight="600" >holds a different answer</text>
-<path d="M92 221.0 C162 221.0 142 332 212 332" fill="none" stroke="#2c4361" stroke-width="1.5"/>
-<text x="224" y="328" class="s" font-size="13.5" fill="#e9eff6" text-anchor="start" font-weight="600" >a seat refuses the proposal</text>
-<text x="224" y="346" class="s" font-size="12" fill="#8da2b9" text-anchor="start" font-weight="400" >both agree what a ruling would have to replace</text>
-<line x1="644" y1="332" x2="706" y2="332" stroke="#2c4361" stroke-width="1.4" marker-end="url(#a)"/>
-<text x="718" y="337" class="s" font-size="13.5" fill="#e9eff6" text-anchor="start" font-weight="600" >one card: replace or drop</text>
-<text x="28" y="416" class="s" font-size="12" fill="#8da2b9" text-anchor="start" font-weight="400" >If the seats cannot agree on what a ruling would replace, the task is blocked and status says why. Nothing is built until every card is ruled.</text>
+<defs>
+<clipPath id="clip"><rect width="960" height="740" rx="16"/></clipPath>
+<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#060c16"/><stop offset="1" stop-color="#0a1422"/></linearGradient>
+<radialGradient id="vig" cx=".5" cy=".42" r=".8"><stop offset=".5" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></radialGradient>
+<filter id="noise" x="0" y="0" width="1" height="1"><feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" seed="7" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 .28 0 0 0 -.1"/></filter>
+<pattern id="grain" width="180" height="180" patternUnits="userSpaceOnUse"><rect width="180" height="180" filter="url(#noise)"/></pattern>
+<pattern id="fold" width="24" height="6" patternUnits="userSpaceOnUse"><rect width="12" height="6" fill="#5cc8f2"/><rect x="12" width="12" height="6" fill="#f5b041"/></pattern>
+<radialGradient id="hw"><stop offset="0" stop-color="#fff"/><stop offset=".22" stop-color="#f5b041" stop-opacity=".9"/><stop offset="1" stop-color="#f5b041" stop-opacity="0"/></radialGradient>
+<radialGradient id="hc"><stop offset="0" stop-color="#fff"/><stop offset=".22" stop-color="#5cc8f2" stop-opacity=".9"/><stop offset="1" stop-color="#5cc8f2" stop-opacity="0"/></radialGradient>
+<radialGradient id="hx"><stop offset="0" stop-color="#fff"/><stop offset=".3" stop-color="#fff" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+<marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 1 9 5 0 9z" fill="#8da2b9"/></marker>
+
+</defs>
+<g clip-path="url(#clip)">
+<rect width="960" height="740" fill="url(#bg)"/>
+<rect width="960" height="740" fill="url(#vig)"/>
+<rect width="960" height="740" fill="url(#grain)"/>
+<text x="40" y="58" class="s" font-size="32" fill="#e9eff6" font-weight="600">How a disagreement reaches you</text><text x="40" y="94" class="s" font-size="21" fill="#8da2b9">After the reveals, how much the seats disagree decides the route.</text>
+<path d="M594 130V610" stroke="#fff" stroke-opacity=".07" stroke-width="1"/>
+<g class="d0" fill="none" stroke="#ffffff" stroke-linecap="round"><path d="M74 370C144 370 114 162 196 162" pathLength="1" stroke-width="11" stroke-opacity=".07"/><path d="M74 370C144 370 114 162 196 162" pathLength="1" stroke-width="5.3" stroke-opacity=".16"/><path d="M74 370C144 370 114 162 196 162" pathLength="1" stroke-width="2.2"/></g>
+<text x="214" y="169" class="s" font-size="23" fill="#e9eff6" font-weight="600">nothing in dispute</text>
+<text x="214" y="199" class="s" font-size="21" fill="#8da2b9">the contract freezes</text>
+<rect x="620" y="148" width="26" height="34" rx="4" fill="none" stroke="#2c4361" stroke-width="1.4" stroke-dasharray="4 3"/>
+<text x="662" y="169" class="s" font-size="22" fill="#8da2b9" font-weight="600">no card</text>
+<g transform="translate(0 -3)"><g class="d1" fill="none" stroke="#5cc8f2" stroke-linecap="round"><path d="M74 370C144 370 114 254 196 254" pathLength="1" stroke-width="9" stroke-opacity=".07"/><path d="M74 370C144 370 114 254 196 254" pathLength="1" stroke-width="4.3" stroke-opacity=".16"/><path d="M74 370C144 370 114 254 196 254" pathLength="1" stroke-width="1.8"/></g></g><g transform="translate(0 3)"><g class="d1" fill="none" stroke="#f5b041" stroke-linecap="round"><path d="M74 370C144 370 114 254 196 254" pathLength="1" stroke-width="9" stroke-opacity=".07"/><path d="M74 370C144 370 114 254 196 254" pathLength="1" stroke-width="4.3" stroke-opacity=".16"/><path d="M74 370C144 370 114 254 196 254" pathLength="1" stroke-width="1.8"/></g></g>
+<text x="214" y="261" class="s" font-size="23" fill="#e9eff6" font-weight="600">one objection</text>
+<text x="214" y="291" class="s" font-size="21" fill="#8da2b9">both answers, both reasons,</text>
+<text x="214" y="319" class="s" font-size="21" fill="#8da2b9">the case that splits them</text>
+<rect x="620" y="240" width="26" height="34" rx="4" fill="#04080e" stroke="#e9eff6" stroke-width="1.4"/><path d="M625.7 250.2H640.3" stroke="#5cc8f2" stroke-width="2.2"/><path d="M625.7 257.7H640.3" stroke="#f5b041" stroke-width="2.2"/><path d="M625.7 265.2H634.3" stroke="#8da2b9" stroke-width="2.2"/>
+<text x="662" y="261" class="s" font-size="22" fill="#e9eff6" font-weight="600">one card</text>
+<path d="M214 232H920" stroke="#fff" stroke-opacity=".07"/>
+<g transform="translate(0 -3)"><g class="d2" fill="none" stroke="#5cc8f2" stroke-linecap="round"><path d="M74 370C144 370 114 374 196 374" pathLength="1" stroke-width="9" stroke-opacity=".07"/><path d="M74 370C144 370 114 374 196 374" pathLength="1" stroke-width="4.3" stroke-opacity=".16"/><path d="M74 370C144 370 114 374 196 374" pathLength="1" stroke-width="1.8"/></g></g><g transform="translate(0 3)"><g class="d2" fill="none" stroke="#f5b041" stroke-linecap="round"><path d="M74 370C144 370 114 374 196 374" pathLength="1" stroke-width="9" stroke-opacity=".07"/><path d="M74 370C144 370 114 374 196 374" pathLength="1" stroke-width="4.3" stroke-opacity=".16"/><path d="M74 370C144 370 114 374 196 374" pathLength="1" stroke-width="1.8"/></g></g>
+<text x="214" y="381" class="s" font-size="23" fill="#e9eff6" font-weight="600">several, or two provisions conflict</text>
+<text x="214" y="411" class="s" font-size="21" fill="#8da2b9">one more exchange: the builder</text>
+<text x="214" y="439" class="s" font-size="21" fill="#8da2b9">proposes one account, the</text>
+<text x="214" y="467" class="s" font-size="21" fill="#8da2b9">challenger reviews exactly that</text>
+<rect x="620" y="360" width="26" height="34" rx="4" fill="#04080e" stroke="#e9eff6" stroke-width="1.4"/><path d="M625.7 370.2H640.3" stroke="#5cc8f2" stroke-width="2.2"/><path d="M625.7 377.7H640.3" stroke="#f5b041" stroke-width="2.2"/><path d="M625.7 385.2H634.3" stroke="#8da2b9" stroke-width="2.2"/>
+<text x="662" y="381" class="s" font-size="22" fill="#e9eff6" font-weight="600">a card only where each</text>
+<text x="662" y="409" class="s" font-size="22" fill="#e9eff6" font-weight="600">holds a different answer</text>
+<path d="M214 352H920" stroke="#fff" stroke-opacity=".07"/>
+<g transform="translate(0 -3)"><g class="d3" fill="none" stroke="#5cc8f2" stroke-linecap="round"><path d="M74 370C144 370 114 522 196 522" pathLength="1" stroke-width="9" stroke-opacity=".07"/><path d="M74 370C144 370 114 522 196 522" pathLength="1" stroke-width="4.3" stroke-opacity=".16"/><path d="M74 370C144 370 114 522 196 522" pathLength="1" stroke-width="1.8"/></g></g><g transform="translate(0 3)"><g class="d3" fill="none" stroke="#f5b041" stroke-linecap="round"><path d="M74 370C144 370 114 522 196 522" pathLength="1" stroke-width="9" stroke-opacity=".07"/><path d="M74 370C144 370 114 522 196 522" pathLength="1" stroke-width="4.3" stroke-opacity=".16"/><path d="M74 370C144 370 114 522 196 522" pathLength="1" stroke-width="1.8"/></g></g>
+<text x="214" y="529" class="s" font-size="23" fill="#e9eff6" font-weight="600">a seat refuses the proposal</text>
+<text x="214" y="559" class="s" font-size="21" fill="#8da2b9">both agree what a ruling</text>
+<text x="214" y="587" class="s" font-size="21" fill="#8da2b9">would have to replace</text>
+<rect x="620" y="508" width="26" height="34" rx="4" fill="#04080e" stroke="#e9eff6" stroke-width="1.4"/><path d="M625.7 518.2H640.3" stroke="#5cc8f2" stroke-width="2.2"/><path d="M625.7 525.7H640.3" stroke="#f5b041" stroke-width="2.2"/><path d="M625.7 533.2H634.3" stroke="#8da2b9" stroke-width="2.2"/>
+<text x="662" y="529" class="s" font-size="22" fill="#e9eff6" font-weight="600">one card: replace or drop</text>
+<path d="M214 500H920" stroke="#fff" stroke-opacity=".07"/>
+<circle cx="74" cy="370" r="22" fill="url(#hx)"/><circle cx="74" cy="370" r="6" fill="#fff"/>
+<text x="40" y="377" class="s" font-size="21" fill="#8da2b9" text-anchor="middle" transform="rotate(-90 40 370)">reveals</text>
+<text x="40" y="654" class="s" font-size="21" fill="#8da2b9">If the seats cannot agree on what a ruling would replace,</text>
+<text x="40" y="682" class="s" font-size="21" fill="#8da2b9">the task is blocked and status says why.</text>
+<text x="40" y="710" class="s" font-size="21" fill="#c3d0de" font-weight="600">Nothing is built until every card is ruled.</text>
+<rect width="960" height="5" fill="url(#fold)"/>
+</g>
+<rect x=".5" y=".5" width="959" height="739" rx="15.5" fill="none" stroke="#fff" stroke-opacity=".1"/>
 </svg>

@@ -2,7 +2,7 @@
 
 A task goes from a spec file to a commit on `main` in nine steps. This page follows one task through them, says what the conductor and each seat do at every step and what gets written down, and then covers chores, repair rounds and resuming after a pause or a crash.
 
-<p align="center"><img src="assets/flow.svg" alt="The life of one task in three lanes: builder, conductor and challenger. Left to right: open, sealed readings, reveal, settle, contract, braid, crossing, land. Each seat writes its reading alone and reviews the other's, only a split reaches the human as a card, the seats build and probe in separate clones, and a failed crossing sends evidence back for at most two repair rounds before main moves with a receipt." width="100%"></p>
+<p align="center"><img src="assets/flow.svg" alt="The life of one task in three lanes: builder (codex in the stub demo), conductor and challenger (claude). Top row: open, sealed readings, reveal, settle. Then the frozen contract, drawn as a band of fixed stars. Bottom row: braid, crossing, land. Each seat writes its reading alone and reviews the other's, only a split reaches the human as a card, the seats build and probe in separate clones, and a failed crossing sends evidence back for at most two repair rounds before main moves with a receipt." width="100%"></p>
 
 The terms (seat, reading, contract, probe, mutant, crossing) are defined in [Concepts](concepts.md). The conductor is ordinary Python with no model in it. It starts the seats, does all the git work and runs every check.
 
