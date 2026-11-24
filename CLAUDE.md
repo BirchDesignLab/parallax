@@ -44,6 +44,7 @@ Work runs in rounds of plan tasks that do not depend on each other, with disjoin
 - Remote: `origin` is `github.com/BirchDesignLab/parallax`, which will be public. Work reaches `main` through a branch and a pull request (developer ruling 2026-11-23), not a direct push. Push only when the developer asks.
 - Public hygiene (developer ruling 2026-11-23): commits are authored as `THobbs23` with the GitHub noreply address set in this repo's git config, never a personal email. No personal email, local account name or home-folder path in any tracked file: write `~` for the home folder.
 - History was rewritten twice on 2026-11-23, around the first push (`scripts/history/`): first the author email and a local account name, then the working notes were removed, which dropped the commits that touched only them. A commit hash quoted in an old commit message may be a pre-rewrite hash: `docs/history/2026-11-23-commit-map.txt` maps old to new.
+- CI (`.github/workflows/ci.yml`) runs on every pull request: `python scripts/ci/check_repo.py` (figures match the generator, no personal email or home path, doc links resolve) and the test suite on Windows. Run the check script locally before opening a pull request.
 - After either CLI updates, rerun `python scripts/probes/seat_smoke.py` (exits non-zero on any failed expectation) and `python scripts/probes/job_object_seats.py`.
 
 ## Public documentation

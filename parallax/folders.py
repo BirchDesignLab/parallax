@@ -62,7 +62,7 @@ def is_private(path: Path) -> bool:
     dacl = _dacl(path)
     if dacl is None:
         return False
-    me = _current_sid()
+    mine = _own_trustees(_current_sid())
     for ace in re.findall(r"\(([^)]*)\)", dacl):
         fields = ace.split(";")
         if len(fields) < 6:
@@ -70,9 +70,19 @@ def is_private(path: Path) -> bool:
         kind, trustee = fields[0], fields[5]
         if kind in _DENY_TYPES:
             continue
-        if trustee != me and trustee not in _ALLOWED:
+        if trustee not in mine and trustee not in _ALLOWED:
             return False
     return True
+
+
+def _own_trustees(sid: str) -> set[str]:
+    """The ways SDDL may write this account: its SID, or `LA` when it is the built-in Administrator.
+
+    SDDL prints the machine's built-in Administrator account (relative id 500) as the alias
+    `LA`, not as its SID. Without this a folder made private by that account, as on a
+    GitHub Actions Windows runner, would never read as private (found 2026-11-24).
+    """
+    return {sid, "LA"} if re.fullmatch(r"S-1-5-21-\d+-\d+-\d+-500", sid) else {sid}
 
 
 def _dacl(path: Path) -> str | None:
