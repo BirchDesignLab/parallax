@@ -27,7 +27,7 @@ Pair two agent CLIs on one task.
 | 2 | The task needs a ruling. One card is printed per open question. | `needs_ruling` |
 | 3 | The task is parked, blocked or dropped. The detail on the last line says why. | `parked`, `blocked`, `dropped` |
 
-argparse also exits with 2 on a usage error such as an unknown flag or a `rule` choice outside `a`, `b`, `other` and `drop`. That case prints a usage message to stderr and no task line, which tells it apart from a task that needs a ruling.
+A usage error, such as an unknown flag or a `rule` choice outside `a`, `b`, `other` and `drop`, prints a usage message to stderr and exits 1, so exit code 2 only ever means a task needs a ruling. A task file that does not exist is also exit 1, with `parallax: file not found: <path>`.
 
 ### `--repo`
 

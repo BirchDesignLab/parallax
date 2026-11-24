@@ -354,7 +354,8 @@ class Failures(unittest.TestCase):
         root = make_project(); codex, claude = agreeing()
         c = kit_conductor(root, codex, claude)
         def peeking(req):
-            other = [e["path"] for e in c.events("clamp-001") if e["type"] == "checkout.created" and e["seat"] == "codex"][0]
+            name = [e["path"] for e in c.events("clamp-001") if e["type"] == "checkout.created" and e["seat"] == "codex"][0]
+            other = str(req.cwd.parent / name)                  # the record holds the folder name only
             return SeatResult(reading()(req), "claude-peek", f'{{"command": "type {other}\\\\clamplib"}}', {"input": 0, "cached": 0, "output": 0})
         claude.script["reading"] = [peeking, reading()]
         self.assertEqual(c.run(root / TASK, stop_after="contract").status, "stopped")

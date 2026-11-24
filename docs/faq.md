@@ -56,7 +56,7 @@ Not yet. v0 runs one task at a time with two seats. Several tasks in flight with
 
 ## Is anything known to be wrong?
 
-Two gaps are open and documented. The committed ledger records each seat clone's absolute path, which includes your account name; see [Receipts and the ledger](receipts.md). And `exclusive` scope paths are not removed from the challenger's scope; see [parallax.toml](configuration.md). The design document lists every place the code differs from the original design.
+One thing to check on an older project: a task landed before 2026-11-23 recorded each seat clone's full path in the committed ledger, which includes your account name. Newer records hold only the clone's folder name. See [Receipts and the ledger](receipts.md). The design document lists every place the code differs from the original design.
 
 ## Why is it called Parallax?
 

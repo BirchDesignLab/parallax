@@ -447,7 +447,7 @@ class Resume(unittest.TestCase):
         root, c, t, settled = two_cards(self)
         self.assertEqual((rule(root, ONE, "a")[0], rule(root, TWO, "b")[0]), (0, 0))
         sealed = {e["seat"]: e["session"] for e in c.events(TASK) if e["type"] == "reading.sealed"}
-        old = {e["seat"]: e["path"] for e in c.events(TASK) if e["type"] == "checkout.created"}
+        old = {e["seat"]: str(t.dir / e["path"]) for e in c.events(TASK) if e["type"] == "checkout.created"}
         lose_folder(self, root, c, t)
         c2, codex, claude = seated(root, c, {"build": [builds()]}, {"probe": [probes()]})
         discards = []
@@ -460,7 +460,7 @@ class Resume(unittest.TestCase):
         # New clones, so new sessions: the old ones went with the folder and are discarded.
         self.assertEqual([r.session for r in codex.calls + claude.calls], [None, None])
         history = on_main(root)
-        new = {e["seat"]: e["path"] for e in history if e["type"] == "checkout.created"}
+        new = {e["seat"]: str(t.dir / e["path"]) for e in history if e["type"] == "checkout.created"}
         built = {e["seat"]: e["session"] for e in history if e["type"] == "attempt.finished"}
         self.assertEqual((sorted(new), [old[seat] == new[seat] for seat in sorted(new)]), (["claude", "codex"], [False, False]))
         # Each reading session is discarded with its lost clone when the clone is made again, and at landing
@@ -493,7 +493,7 @@ class Resume(unittest.TestCase):
         c2, codex, claude = seated(root, c, {"build": [builds()]}, {"probe": [probes()]})
         self.assertEqual(run(c2, root).status, "landed")
         self.assertEqual([(r.session, str(r.cwd)) for r in codex.calls + claude.calls],
-                         [(sealed["codex"], clones[0]["path"]), (sealed["claude"], clones[1]["path"])])
+                         [(sealed["codex"], str(t.dir / clones[0]["path"])), (sealed["claude"], str(t.dir / clones[1]["path"]))])
         self.assertEqual([e["type"] for e in on_main(root)].count("checkout.created"), 2)
 
     def test_a_refusal_drop_lands_its_record_with_no_contract_folder_or_clone(self):

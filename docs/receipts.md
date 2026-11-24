@@ -119,7 +119,7 @@ A trailer is one line, so runs of whitespace in the text, line breaks included, 
 
 Events from seat calls carry the token usage of the call. Events already written to a ledger keep the figures they were written with. [Field notes](field-notes.md) explains a correction to how Codex's usage is counted.
 
-**Known gap: the ledger records absolute paths.** Each `checkout.created` event stores the full path of a seat's clone, which sits under your home folder, and the ledger is committed. Publishing a project therefore publishes that path, account name included. No seat is shown it, so the blind is unaffected. Check `.parallax/ledger.jsonl` before you push a project to a public remote.
+**Clone paths in the ledger.** A `checkout.created` event records a seat clone by its folder name, such as `codex-1a2b3c4d`, and the conductor resolves it against the task's state folder. Audit hits in `reading.voided` and `attempt.voided` are recorded relative to that folder too. Tasks landed before 2026-11-23 recorded the clone's full path, which sits under your home folder: check an older `.parallax/ledger.jsonl` before you push that project to a public remote.
 
 ### The journal
 

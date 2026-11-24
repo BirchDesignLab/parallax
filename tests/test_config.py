@@ -18,6 +18,7 @@ class LoadConfig(unittest.TestCase):
         self.assertEqual(cfg.lint, "python -m compileall -q .")
         self.assertEqual(cfg.builder_scope, ("src/**", "pyproject.toml", "uv.lock"))
         self.assertEqual(cfg.challenger_scope, ("tests/**",))
+        self.assertEqual(cfg.exclusive_scope, ("pyproject.toml", "uv.lock"))      # the builder's alone
         self.assertEqual((cfg.merge, cfg.pair, cfg.max_repair_rounds, cfg.mutants), ("auto", "behavior", 2, 3))
         self.assertEqual([(s.name, s.adapter, s.model, s.effort) for s in cfg.seats],
                          [("codex", "codex", "gpt-6.2-astra", "xhigh"), ("claude", "claude", "fable", "high")])
@@ -42,6 +43,11 @@ class LoadConfig(unittest.TestCase):
             MINIMAL + '[policy]\nmerge = "manual"\n': "merge",
             MINIMAL + '[policy]\npair = "all"\n': "pair",
             "not = [valid": "parallax.toml",
+            MINIMAL.replace('check = "x"', 'check = "x"\nlnit = "y"'): "unknown key project.lnit",
+            MINIMAL.replace('challenger = ["b/**"]', 'challenger = ["b/**"]\nexclusiv = ["c"]'): "unknown key scopes.exclusiv",
+            MINIMAL + '[policy]\nmutant = 2\n': "unknown key policy.mutant",
+            MINIMAL.replace('[seats.claude]\nmodel', '[seats.claude]\nmodle = "x"\nmodel'): "unknown key seats.claude.modle",
+            MINIMAL + '[polcy]\nmutants = 2\n': "unknown key [polcy]",
         }
         for text, needle in cases.items():
             with self.subTest(needle=needle), self.assertRaises(ConfigError) as caught:

@@ -114,14 +114,14 @@ Each seat works in its own clone, under a random name, in a state folder outside
 - A receipt says every landed change matched its accepted inventory of files. It does not say an independent reviewer judged each file relevant.
 - It runs one task at a time, with two seats, on Windows.
 - An A/B card, the direct settlement path and a run killed mid-step have so far run only on stub seats, not with real models.
-- Two known gaps are open. The committed ledger records each seat clone's absolute path, so publishing a project publishes a path under your home folder. And `exclusive` paths are added to the builder's scope without being removed from the challenger's, so keep the two scope lists apart yourself.
+- The committed ledger of a task landed before 2026-11-23 records each seat clone's full path, home folder included. Newer records hold only the clone's folder name. Check an older project's `.parallax/ledger.jsonl` before publishing it.
 
 ## How it was built
 
 Parallax was designed the way it works. Claude Code and Codex each wrote a proposal without seeing the other's, then each reviewed the other's. They arrived at the same core independently, which is the main reason to trust it. The [design document](docs/superpowers/specs/2026-11-16-parallax-design.md) records which decisions were the human's rulings and which were the agents' proposals, and keeps a dated list of what has been verified on a real machine and what has not.
 
 - About 6,200 lines of Python, standard library only.
-- 403 tests run the conductor's every branch on scripted stub seats, spending nothing: disagreement, each settlement path, ruling, failed crossing, surviving mutant, repair, voided attempt, and resuming after an interruption at each step.
+- 407 tests run the conductor's every branch on scripted stub seats, spending nothing: disagreement, each settlement path, ruling, failed crossing, surviving mutant, repair, voided attempt, and resuming after an interruption at each step.
 - `scripts/probes/seat_smoke.py` reproduces what the real CLIs were observed to do and exits non-zero if any expectation fails. It is rerun whenever either CLI updates.
 
 ```powershell

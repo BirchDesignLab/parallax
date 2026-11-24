@@ -1,4 +1,6 @@
-import threading, unittest
+import dataclasses, threading, unittest
+import types as types_
+from pathlib import Path
 from parallax.gitops import rev
 from parallax.ledger import Journal, parse_lines
 from parallax.seats.base import SeatResult
@@ -67,6 +69,37 @@ class Rejections(unittest.TestCase):
         c = kit_conductor(root, codex, claude)
         return c, c.run(root / TASK), codex, claude
 
+    def test_an_exclusive_path_is_closed_to_the_challenger_even_inside_its_own_patterns(self):
+        root = make_project(); codex, claude = seats([builds()], [])
+        c = kit_conductor(root, codex, claude)
+        c.cfg = dataclasses.replace(c.cfg, exclusive_scope=("tests/conftest.py",))     # also matched by tests/**
+        def undo(req):
+            (req.cwd / "tests/conftest.py").unlink()
+            return probes()(req)
+        claude.script["probe"] = [probes(extra={"tests/conftest.py": "x = 1\n"}), undo]
+        self.assertEqual(c.run(root / TASK).status, "landed")
+        rejected = [e for e in c.events("clamp-001") if e["type"] == "attempt.rejected"]
+        self.assertEqual([(e["seat"], e["reason"]) for e in rejected],
+                         [("claude", "you changed files reserved for the builder: tests/conftest.py")])
+        self.assertNotIn("tests/conftest.py", run_git(c.cfg.root, "show", "--name-only", "--format=", "main"))
+
+    def test_the_ledger_names_a_clone_by_its_folder_and_never_by_a_full_path(self):
+        c, out, _, _ = self.run_with([builds()], [probes()])
+        self.assertEqual(out.status, "landed")
+        ledger = run_git(c.cfg.root, "show", "main:.parallax/ledger.jsonl")
+        names = [e["path"] for e in c.events("clamp-001") if e["type"] == "checkout.created"]
+        self.assertEqual(sorted(n.split("-")[0] for n in names), ["claude", "codex"])
+        for name in names:
+            self.assertEqual(name, Path(name).name)                       # a folder name, no separators
+        self.assertNotIn(str(c.home).replace("\\", "\\\\"), ledger)       # as JSON would escape it
+        self.assertNotIn(c.home.as_posix(), ledger)
+        # A record written before this rule holds the full path and still reads.
+        t = types_.SimpleNamespace(id="old", dir=Path("C:/state/key/old"))
+        c.events = lambda task: [{"type": "checkout.created", "seat": "codex", "path": str(Path("C:/elsewhere/codex-1"))},
+                                 {"type": "checkout.created", "seat": "codex", "path": "codex-2"}]
+        self.assertEqual(c._clones_of(t, "codex"), [str(Path("C:/elsewhere/codex-1")), str(Path("C:/state/key/old/codex-2"))])
+        self.assertEqual(c._named(t, [str(t.dir / "claude-9"), str(t.dir / "cross"), "D:/x/y"]), ["claude-9", "cross", "y"])
+
     def test_out_of_scope_edit_is_rejected_then_accepted_once_undone(self):
         def undo(req):
             (req.cwd / "tests/sneaky.py").unlink()
@@ -108,7 +141,8 @@ class BlindAndResume(unittest.TestCase):
         c = kit_conductor(root, codex, claude)
         def peeking(req):
             builds()(req)
-            other = [e["path"] for e in c.events("clamp-001") if e["type"] == "checkout.created" and e["seat"] == "claude"][0]
+            name = [e["path"] for e in c.events("clamp-001") if e["type"] == "checkout.created" and e["seat"] == "claude"][0]
+            other = str(req.cwd.parent / name)                  # the record holds the folder name only
             return SeatResult({"summary": "", "blocked": "", "mutants": [], "files": []}, req.session,
                               "dir " + other.replace("\\", "/") + "/tests", {"input": 0, "cached": 0, "output": 0})
         codex.script["build"] = [peeking, builds()]

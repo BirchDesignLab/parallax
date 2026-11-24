@@ -13,7 +13,7 @@ Every table and key in `parallax.toml` that Parallax reads, with its type, defau
 | `[policy]` | no | Merge and pairing policy, repair rounds, mutant count. |
 | `[seats.<name>]` | yes, exactly two | The two agent CLIs: adapter, model, effort. |
 
-Parallax does not warn about keys it does not recognize. A misspelled optional key is ignored and its default applies, so check spelling against the tables below.
+A key Parallax does not know is an error that names it, for example `unknown key project.lnit`, so a misspelled key cannot fall back to its default unnoticed.
 
 ## [project]
 
@@ -65,9 +65,9 @@ The paths each role may write. Every changed path is checked against the writing
 |---|---|---|---|
 | `builder` | list of strings | none (required) | Paths the builder may write. |
 | `challenger` | list of strings | none (required) | Paths the challenger may write. |
-| `exclusive` | list of strings | `[]` | Paths both roles might need, such as manifests and lockfiles. Added to the builder's paths. |
+| `exclusive` | list of strings | `[]` | Paths both roles might need, such as manifests and lockfiles. They belong to the builder: added to its paths and closed to the challenger. |
 
-Each entry must be a nonempty string. The effective builder scope is `builder` followed by `exclusive`. The challenger's scope is `challenger` alone. Parallax does not check that the lists are disjoint, and `exclusive` does not remove anything from the challenger's list, so keep the lists apart yourself.
+Each entry must be a nonempty string. The effective builder scope is `builder` followed by `exclusive`. The challenger's scope is `challenger`, minus anything `exclusive` matches: a challenger attempt that changes such a path is rejected with `you changed files reserved for the builder`, even where a challenger pattern also matches it. Parallax does not otherwise check that the `builder` and `challenger` lists are disjoint, so keep those two apart yourself.
 
 The seats only edit files. The conductor does all git work and makes the commits.
 

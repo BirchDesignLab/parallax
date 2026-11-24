@@ -84,7 +84,7 @@ A seat keeps one session for the length of a task, so a repair starts with its o
 The blind only means something if each seat stays inside its own half.
 
 - **Paths.** Each role has path patterns in `[scopes]` in `parallax.toml`: for example, builder `src/**` and challenger `tests/**`. `*` matches within one path segment and `**` matches any depth. Matching is case-sensitive, relative to the project root.
-- **Exclusive paths.** Files both roles would need, such as lockfiles and manifests, are listed as `exclusive` and belong to the builder for that task.
+- **Exclusive paths.** Files both roles would need, such as lockfiles and manifests, are listed as `exclusive` and belong to the builder. A challenger attempt that changes one is rejected, even where a challenger pattern also matches it.
 - **Working folders.** Inside a clone, `.parallax-mutants/<id>/` holds the builder's mutants and `.parallax-scratch/` holds scratch notes. The conductor moves mutants out and neither folder ever lands. `.parallax/` belongs to the conductor.
 - **Seats only edit files. The conductor does all the git work.** It checks every changed path against the seat's patterns, rejects the attempt if any falls outside, and makes the commits itself. A seat does not run git.
 - **The conductor runs every check.** Seats are not relied on to run project tools. Their briefs say they cannot run the project's tests, and on this machine Codex's sandbox cannot execute Python at all. A project may name a quick `lint` command. The conductor runs it on a seat's clone after each attempt, and a failure goes straight back to that seat without using up a repair round.

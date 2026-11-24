@@ -18,8 +18,16 @@ from parallax.gitops import GitError
 _EXIT = {"landed": 0, "needs_ruling": 2, "parked": 3, "blocked": 3, "dropped": 3}
 
 
+class _Parser(argparse.ArgumentParser):
+    """Usage errors exit 1, like every other error: exit code 2 means only that a task needs a ruling."""
+
+    def error(self, message: str):
+        self.print_usage(sys.stderr)
+        self.exit(1, f"{self.prog}: error: {message}\n")
+
+
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="parallax", description="Pair two agent CLIs on one task.")
+    parser = _Parser(prog="parallax", description="Pair two agent CLIs on one task.")
     sub = parser.add_subparsers(dest="command", required=True, metavar="{init,run,rule,status,demo}")
 
     def repo(p):
@@ -156,6 +164,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "rule":
             return _rule(args, root)
         return _status(root)
+    except FileNotFoundError as exc:
+        print(f"parallax: file not found: {exc.filename}", file=sys.stderr)
+        return 1
     except (ConfigError, GitError, ValueError, RuntimeError) as exc:
         print(f"parallax: {exc}", file=sys.stderr)
         return 1

@@ -297,17 +297,17 @@ Not yet verified: nothing the design relies on. Rerun the probe when either CLI 
 
 ## Where the code differs from this document
 
-Recorded 2026-11-23, while the reference pages under `docs/` were written against the code. The code is the authority in each case. The first two are gaps to close, not choices.
+Recorded 2026-11-23, while the reference pages under `docs/` were written against the code. The code is the authority in each case. Four entries were gaps and were fixed the same day; they are kept here, marked, because the text above still reads the old way or says nothing.
 
-**Known gaps**
+**Gaps, fixed 2026-11-23**
 
-1. **The ledger records absolute clone paths.** Each `checkout.created` event stores the seat clone's full path, and landing moves a task's events into `.parallax/ledger.jsonl`, which is committed. A project's ledger therefore carries a path under the human's home folder, account name included. Nothing in a brief or a card shows a seat that path (briefs are scrubbed), so the blind is not affected; the cost is that publishing a project publishes the path. Not fixed.
-2. **`exclusive` does not exclude.** "Who may write what" says files both roles would need are listed as exclusive and belong to the builder. The code only adds the `exclusive` patterns to the builder's scope. It does not remove them from the challenger's, and it does not check that the two scopes are disjoint, so a path matched by both lists can be written by either seat. Not fixed.
+1. **The ledger recorded absolute clone paths.** Each `checkout.created` event stored the seat clone's full path, and landing moves a task's events into `.parallax/ledger.jsonl`, which is committed, so a project's ledger carried a path under the human's home folder. Fixed: the event records the clone's folder name and the conductor resolves it against the task's state folder; audit hits in `reading.voided`, `attempt.voided` and a `seat.failed` raised by the audit are recorded relative to that folder. Events written earlier keep the full path and still read. No brief or card ever showed a seat that path, so the blind was not affected.
+2. **`exclusive` did not exclude.** The code only added the `exclusive` patterns to the builder's scope, so a path matched by both `challenger` and `exclusive` could be written by either seat. Fixed: a challenger attempt that changes a path `exclusive` matches is rejected (`you changed files reserved for the builder`). The `builder` and `challenger` lists themselves are still not checked for overlap.
 
 **Seats and adapters**
 
 3. **The `stub` adapter is not a config option.** "Seats" calls it a third adapter. Only `claude` and `codex` are registered. `stub` is registered for the length of `parallax demo --stub` and by the tests; `adapter = "stub"` in a project's `parallax.toml` fails with an unknown-adapter error.
-4. **Config keys this document does not show.** `[project]` also reads `check_timeout` (seconds, default 600, used for `check` and `lint`), `seat_timeout` (default 1800) and `count_pattern` (a regular expression that reads the probe count from the check's output; the default matches unittest's "Ran N tests" line). Each `[seats.<name>]` table also reads `adapter`, which defaults to the seat's name. `[policy] merge` accepts only `"auto"` and `pair` only `"behavior"`; any other value is an error. Unrecognized keys are ignored without a warning.
+4. **Config keys this document does not show.** `[project]` also reads `check_timeout` (seconds, default 600, used for `check` and `lint`), `seat_timeout` (default 1800) and `count_pattern` (a regular expression that reads the probe count from the check's output; the default matches unittest's "Ran N tests" line). Each `[seats.<name>]` table also reads `adapter`, which defaults to the seat's name. `[policy] merge` accepts only `"auto"` and `pair` only `"behavior"`; any other value is an error. An unknown table or key was ignored without a warning; fixed 2026-11-23, it is now an error that names the key.
 
 **Keeping the blind honest**
 
@@ -329,7 +329,7 @@ Recorded 2026-11-23, while the reference pages under `docs/` were written agains
 **Commands**
 
 16. **Task id.** The file name without its last extension, so `parser.v2.md` is task `parser.v2`. Letters, digits, `.`, `_` and `-`, starting with a letter or digit.
-17. **Exit code 2 has two meanings.** A task that needs a ruling exits 2, and so does a usage error from the argument parser. The usage error prints no task line.
+17. **Exit code 2 had two meanings.** A task that needs a ruling exits 2, and so did a usage error from the argument parser. Fixed 2026-11-23: a usage error exits 1, and so does a task file that does not exist, which used to end in a traceback.
 18. **`run --builder SEAT`** chooses the builder when a task is first opened. It is not listed under "Commands".
 
 ## Left to the builder
