@@ -1,38 +1,56 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 326" width="960" height="326" role="img" aria-label="A landing commit&#x27;s receipt: task, contract hash, builder, challenger, checks and verdict.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" width="960" height="800" role="img" aria-label="A landing commit&#x27;s receipt: task, contract hash, builder, challenger, checks and verdict.">
 <title>A landing commit&#x27;s receipt: task, contract hash, builder, challenger, checks and verdict.</title>
 <style>
-.s{font-family:'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif}.m{font-family:ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}
-
+.s{font-family:'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif}.m{font-family:'Cascadia Mono', ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}
+@keyframes draw{from{stroke-dashoffset:1.05}to{stroke-dashoffset:0}}
+@keyframes fade{from{opacity:0}}
+.tk{animation:feed 1.5s cubic-bezier(.3,.6,.2,1) .2s both}
+@keyframes feed{from{transform:translateY(-352px)}}
+.r0{animation:fade .4s ease-out 1.00s both}
+.r1{animation:fade .4s ease-out 1.18s both}
+.r2{animation:fade .4s ease-out 1.36s both}
+.r3{animation:fade .4s ease-out 1.54s both}
+.r4{animation:fade .4s ease-out 1.72s both}
+.r5{animation:fade .4s ease-out 1.90s both}
+.r6{animation:fade .4s ease-out 2.08s both}
 @media (prefers-reduced-motion: reduce){*{animation:none!important}}
 </style>
-<rect width="960" height="326" rx="14" fill="#0c1726"/>
-<text x="28" y="44" class="s" font-size="20" fill="#e9eff6" text-anchor="start" font-weight="600" >Every commit on main carries its receipt</text>
-<rect x="28" y="76" width="548" height="214" rx="7" fill="#13243b" stroke="#2c4361"/>
-<text x="48" y="106" class="m" font-size="13" fill="#8da2b9" text-anchor="start" font-weight="400" >293c8db</text>
-<text x="120" y="106" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="600" >clamp-001: Add clamp(x, lo, hi) to clamplib</text>
-<line x1="28" y1="122" x2="576" y2="122" stroke="#2c4361" stroke-width="1" />
-<text x="48" y="150" class="m" font-size="13" fill="#8da2b9" text-anchor="start" font-weight="400" >Parallax-Task:</text>
-<text x="208" y="150" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="400" >clamp-001</text>
-<text x="48" y="174" class="m" font-size="13" fill="#8da2b9" text-anchor="start" font-weight="400" >Parallax-Contract:</text>
-<text x="208" y="174" class="m" font-size="13" fill="#c3d0de" text-anchor="start" font-weight="400" >sha256:c317c9e49ac1...6a93fe083</text>
-<text x="48" y="198" class="m" font-size="13" fill="#8da2b9" text-anchor="start" font-weight="400" >Built-by:</text>
-<text x="208" y="198" class="m" font-size="13" fill="#5cc8f2" text-anchor="start" font-weight="400" >codex gpt-6.2-astra/xhigh</text>
-<text x="48" y="222" class="m" font-size="13" fill="#8da2b9" text-anchor="start" font-weight="400" >Challenged-by:</text>
-<text x="208" y="222" class="m" font-size="13" fill="#f5b041" text-anchor="start" font-weight="400" >claude fable/high</text>
-<text x="48" y="246" class="m" font-size="13" fill="#8da2b9" text-anchor="start" font-weight="400" >Checks:</text>
-<text x="208" y="246" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="400" >84 probes passed, 3 of 3 mutants caught</text>
-<text x="48" y="270" class="m" font-size="13" fill="#8da2b9" text-anchor="start" font-weight="400" >Verdict:</text>
-<text x="208" y="270" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="600" >consensus</text>
-<text x="606" y="90" class="s" font-size="13.5" fill="#c3d0de" text-anchor="start" font-weight="600" >The verdict says how it got there</text>
-<text x="606" y="120" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="600" >consensus</text>
-<text x="606" y="136" class="s" font-size="12" fill="#8da2b9" text-anchor="start" font-weight="400" >clean at the first crossing</text>
-<text x="606" y="157" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="600" >resolved</text>
-<text x="606" y="173" class="s" font-size="12" fill="#8da2b9" text-anchor="start" font-weight="400" >the seats settled a dispute</text>
-<text x="606" y="194" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="600" >ruled</text>
-<text x="606" y="210" class="s" font-size="12" fill="#8da2b9" text-anchor="start" font-weight="400" >a human ruling was needed</text>
-<text x="606" y="231" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="600" >limited</text>
-<text x="606" y="247" class="s" font-size="12" fill="#8da2b9" text-anchor="start" font-weight="400" >accepted with a stated limitation</text>
-<text x="606" y="268" class="m" font-size="13" fill="#e9eff6" text-anchor="start" font-weight="600" >solo</text>
-<text x="606" y="284" class="s" font-size="12" fill="#8da2b9" text-anchor="start" font-weight="400" >a chore, built by one seat</text>
-<text x="28" y="308" class="s" font-size="11.5" fill="#8da2b9" text-anchor="start" font-weight="400" >The receipt of the first real run with the settlement, 2026-11-23. Hash shortened to fit.</text>
+<defs>
+<clipPath id="clip"><rect width="960" height="800" rx="16"/></clipPath>
+<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#060c16"/><stop offset="1" stop-color="#0a1422"/></linearGradient>
+<radialGradient id="vig" cx=".5" cy=".42" r=".8"><stop offset=".5" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></radialGradient>
+<filter id="noise" x="0" y="0" width="1" height="1"><feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" seed="7" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 .28 0 0 0 -.1"/></filter>
+<pattern id="grain" width="180" height="180" patternUnits="userSpaceOnUse"><rect width="180" height="180" filter="url(#noise)"/></pattern>
+<pattern id="fold" width="24" height="6" patternUnits="userSpaceOnUse"><rect width="12" height="6" fill="#5cc8f2"/><rect x="12" width="12" height="6" fill="#f5b041"/></pattern>
+<radialGradient id="hw"><stop offset="0" stop-color="#fff"/><stop offset=".22" stop-color="#f5b041" stop-opacity=".9"/><stop offset="1" stop-color="#f5b041" stop-opacity="0"/></radialGradient>
+<radialGradient id="hc"><stop offset="0" stop-color="#fff"/><stop offset=".22" stop-color="#5cc8f2" stop-opacity=".9"/><stop offset="1" stop-color="#5cc8f2" stop-opacity="0"/></radialGradient>
+<radialGradient id="hx"><stop offset="0" stop-color="#fff"/><stop offset=".3" stop-color="#fff" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+<marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 1 9 5 0 9z" fill="#8da2b9"/></marker>
+<clipPath id="feed"><rect x="0" y="86" width="960" height="362"/></clipPath>
+</defs>
+<g clip-path="url(#clip)">
+<rect width="960" height="800" fill="url(#bg)"/>
+<rect width="960" height="800" fill="url(#vig)"/>
+<rect width="960" height="800" fill="url(#grain)"/>
+<text x="40" y="58" class="s" font-size="32" fill="#e9eff6" font-weight="600">Every commit on main carries its receipt</text>
+<g clip-path="url(#feed)"><g class="tk"><path d="M40 96H922V428L915 437L908 428L901 437L894 428L887 437L880 428L873 437L866 428L859 437L852 428L845 437L838 428L831 437L824 428L817 437L810 428L803 437L796 428L789 437L782 428L775 437L768 428L761 437L754 428L747 437L740 428L733 437L726 428L719 437L712 428L705 437L698 428L691 437L684 428L677 437L670 428L663 437L656 428L649 437L642 428L635 437L628 428L621 437L614 428L607 437L600 428L593 437L586 428L579 437L572 428L565 437L558 428L551 437L544 428L537 437L530 428L523 437L516 428L509 437L502 428L495 437L488 428L481 437L474 428L467 437L460 428L453 437L446 428L439 437L432 428L425 437L418 428L411 437L404 428L397 437L390 428L383 437L376 428L369 437L362 428L355 437L348 428L341 437L334 428L327 437L320 428L313 437L306 428L299 437L292 428L285 437L278 428L271 437L264 428L257 437L250 428L243 437L236 428L229 437L222 428L215 437L208 428L201 437L194 428L187 437L180 428L173 437L166 428L159 437L152 428L145 437L138 428L131 437L124 428L117 437L110 428L103 437L96 428L89 437L82 428L75 437L68 428L61 437L54 428L47 437L40 428L40 428Z" fill="#15273f" stroke="#2c4361" stroke-width="1.2"/><path d="M40 96H922V428L915 437L908 428L901 437L894 428L887 437L880 428L873 437L866 428L859 437L852 428L845 437L838 428L831 437L824 428L817 437L810 428L803 437L796 428L789 437L782 428L775 437L768 428L761 437L754 428L747 437L740 428L733 437L726 428L719 437L712 428L705 437L698 428L691 437L684 428L677 437L670 428L663 437L656 428L649 437L642 428L635 437L628 428L621 437L614 428L607 437L600 428L593 437L586 428L579 437L572 428L565 437L558 428L551 437L544 428L537 437L530 428L523 437L516 428L509 437L502 428L495 437L488 428L481 437L474 428L467 437L460 428L453 437L446 428L439 437L432 428L425 437L418 428L411 437L404 428L397 437L390 428L383 437L376 428L369 437L362 428L355 437L348 428L341 437L334 428L327 437L320 428L313 437L306 428L299 437L292 428L285 437L278 428L271 437L264 428L257 437L250 428L243 437L236 428L229 437L222 428L215 437L208 428L201 437L194 428L187 437L180 428L173 437L166 428L159 437L152 428L145 437L138 428L131 437L124 428L117 437L110 428L103 437L96 428L89 437L82 428L75 437L68 428L61 437L54 428L47 437L40 428L40 428Z" fill="url(#grain)"/><text x="68" y="148" class="m r0" font-size="22"><tspan fill="#8da2b9">293c8db  </tspan><tspan fill="#e9eff6" font-weight="600">clamp-001: Add clamp(x, lo, hi) to clamplib</tspan></text><path d="M68 170H894" stroke="#2c4361" stroke-width="1.4" stroke-dasharray="6 5"/><text x="68" y="208" class="m r1" font-size="22"><tspan fill="#8da2b9">Parallax-Task:</tspan></text><text x="318.8" y="208" class="m r1" font-size="22" fill="#e9eff6">clamp-001</text><text x="68" y="246" class="m r2" font-size="22"><tspan fill="#8da2b9">Parallax-Contract:</tspan></text><text x="318.8" y="246" class="m r2" font-size="22" fill="#e9eff6">sha256:c317c9e49ac1...6a93fe083</text><text x="68" y="284" class="m r3" font-size="22"><tspan fill="#8da2b9">Built-by:</tspan></text><text x="318.8" y="284" class="m r3" font-size="22" fill="#5cc8f2">codex gpt-6.2-astra/xhigh</text><text x="68" y="322" class="m r4" font-size="22"><tspan fill="#8da2b9">Challenged-by:</tspan></text><text x="318.8" y="322" class="m r4" font-size="22" fill="#f5b041">claude fable/high</text><text x="68" y="360" class="m r5" font-size="22"><tspan fill="#8da2b9">Checks:</tspan></text><text x="318.8" y="360" class="m r5" font-size="22" fill="#e9eff6">84 probes passed, 3 of 3 mutants caught</text><text x="68" y="398" class="m r6" font-size="22"><tspan fill="#8da2b9">Verdict:</tspan></text><text x="318.8" y="398" class="m r6" font-size="23" fill="#ffffff" font-weight="700">consensus</text></g></g>
+<rect x="24" y="74" width="912" height="24" rx="12" fill="#04080e" stroke="#2c4361"/>
+<rect x="44" y="93" width="872" height="4" rx="2" fill="url(#fold)"/>
+<text x="40" y="494" class="s" font-size="23" fill="#c3d0de" font-weight="600">The verdict says how it got there</text>
+<circle cx="50" cy="535" r="4.5" fill="#fff"/>
+<text x="64" y="542" class="m" font-size="23" fill="#e9eff6" font-weight="600">consensus</text>
+<text x="64" y="570" class="s" font-size="21" fill="#8da2b9">clean at the first crossing</text>
+<text x="64" y="610" class="m" font-size="23" fill="#c3d0de">resolved</text>
+<text x="64" y="638" class="s" font-size="21" fill="#8da2b9">a failed crossing, repaired by the seats</text>
+<text x="64" y="678" class="m" font-size="23" fill="#c3d0de">ruled</text>
+<text x="64" y="706" class="s" font-size="21" fill="#8da2b9">a human ruling was needed</text>
+<text x="504" y="542" class="m" font-size="23" fill="#c3d0de">limited</text>
+<text x="504" y="570" class="s" font-size="21" fill="#8da2b9">accepted with a stated limitation</text>
+<text x="504" y="610" class="m" font-size="23" fill="#c3d0de">solo</text>
+<text x="504" y="638" class="s" font-size="21" fill="#8da2b9">a chore, built by one seat</text>
+<text x="40" y="750" class="s" font-size="21" fill="#8da2b9">The receipt of the first real run with the settlement, 2026-11-23.</text>
+<text x="40" y="778" class="s" font-size="21" fill="#8da2b9">Hash shortened to fit.</text>
+<rect width="960" height="5" fill="url(#fold)"/>
+</g>
+<rect x=".5" y=".5" width="959" height="799" rx="15.5" fill="none" stroke="#fff" stroke-opacity=".1"/>
 </svg>

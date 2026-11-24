@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/banner.svg" alt="Parallax: one model builds, the other checks blind, and where their lines cross is the evidence." width="100%">
+  <img src="docs/assets/banner.svg" alt="The Parallax wordmark between the codex and claude seats, whose sight lines cross above it: one model builds, the other checks blind, and where their lines cross is the evidence." width="100%">
 </p>
 
 Parallax pairs Claude Code and Codex on every change. One builds it. The other, without seeing the code, writes the checks that will judge it. When they agree, the change lands on `main` with a receipt saying who built it, who challenged it and what was checked. When they disagree, you get one card with both answers and the concrete case that tells them apart.
@@ -20,7 +20,7 @@ Then the two meet for the first time, at the **crossing**: the probes must pass 
 Agreement is evidence. Disagreement is the valuable output: it is either a bug or a hole in the spec, and it is the only thing that reaches you.
 
 <p align="center">
-  <img src="docs/assets/flow.svg" alt="The life of one task: open, sealed readings, reveal, settlement, contract, braid, crossing, and landing with a receipt. The builder and the challenger work in separate lanes; the conductor sits between them." width="100%">
+  <img src="docs/assets/flow.svg" alt="The life of one task: open, sealed readings, reveal, settlement, contract, braid, crossing, and landing with a receipt. The builder and the challenger work in separate lanes, shown with the stub demo's roles (codex builds, claude challenges); the conductor sits between them, and the frozen contract divides the steps before it from those after." width="100%">
 </p>
 
 Roles swap every task, so each model spends half its time being checked by the other. More in [The life of a task](docs/life-of-a-task.md).

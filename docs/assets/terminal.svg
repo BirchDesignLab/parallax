@@ -1,54 +1,80 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 548" width="960" height="548" role="img" aria-label="Terminal replay of the stub demo: the seats disagree about lo &gt; hi, a ruling card is printed, the human rules, the task lands.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 864" width="960" height="864" role="img" aria-label="Terminal replay of the stub demo: the seats disagree about lo &gt; hi, a ruling card is printed, the human rules, the task lands.">
 <title>Terminal replay of the stub demo: the seats disagree about lo &gt; hi, a ruling card is printed, the human rules, the task lands.</title>
 <style>
-.s{font-family:'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif}.m{font-family:ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}
-.l0{animation:k0 30.0s linear infinite}@keyframes k0{0%,2.00%{opacity:0}2.60%,96%{opacity:1}100%{opacity:0}}
-.l1{animation:k1 30.0s linear infinite}@keyframes k1{0%,5.67%{opacity:0}6.27%,96%{opacity:1}100%{opacity:0}}
-.l2{animation:k2 30.0s linear infinite}@keyframes k2{0%,7.50%{opacity:0}8.10%,96%{opacity:1}100%{opacity:0}}
-.l3{animation:k3 30.0s linear infinite}@keyframes k3{0%,9.33%{opacity:0}9.93%,96%{opacity:1}100%{opacity:0}}
-.l4{animation:k4 30.0s linear infinite}@keyframes k4{0%,11.17%{opacity:0}11.77%,96%{opacity:1}100%{opacity:0}}
-.l5{animation:k5 30.0s linear infinite}@keyframes k5{0%,13.00%{opacity:0}13.60%,96%{opacity:1}100%{opacity:0}}
-.l6{animation:k6 30.0s linear infinite}@keyframes k6{0%,14.83%{opacity:0}15.43%,96%{opacity:1}100%{opacity:0}}
-.l7{animation:k7 30.0s linear infinite}@keyframes k7{0%,16.67%{opacity:0}17.27%,96%{opacity:1}100%{opacity:0}}
-.l9{animation:k9 30.0s linear infinite}@keyframes k9{0%,20.17%{opacity:0}20.77%,96%{opacity:1}100%{opacity:0}}
-.l10{animation:k10 30.0s linear infinite}@keyframes k10{0%,22.00%{opacity:0}22.60%,96%{opacity:1}100%{opacity:0}}
-.l11{animation:k11 30.0s linear infinite}@keyframes k11{0%,23.83%{opacity:0}24.43%,96%{opacity:1}100%{opacity:0}}
-.l12{animation:k12 30.0s linear infinite}@keyframes k12{0%,25.67%{opacity:0}26.27%,96%{opacity:1}100%{opacity:0}}
-.l14{animation:k14 30.0s linear infinite}@keyframes k14{0%,29.17%{opacity:0}29.77%,96%{opacity:1}100%{opacity:0}}
-.l15{animation:k15 30.0s linear infinite}@keyframes k15{0%,32.83%{opacity:0}33.43%,96%{opacity:1}100%{opacity:0}}
-.l16{animation:k16 30.0s linear infinite}@keyframes k16{0%,34.67%{opacity:0}35.27%,96%{opacity:1}100%{opacity:0}}
-.l17{animation:k17 30.0s linear infinite}@keyframes k17{0%,38.33%{opacity:0}38.93%,96%{opacity:1}100%{opacity:0}}
-.l18{animation:k18 30.0s linear infinite}@keyframes k18{0%,40.17%{opacity:0}40.77%,96%{opacity:1}100%{opacity:0}}
-.l19{animation:k19 30.0s linear infinite}@keyframes k19{0%,42.00%{opacity:0}42.60%,96%{opacity:1}100%{opacity:0}}
-.l20{animation:k20 30.0s linear infinite}@keyframes k20{0%,43.83%{opacity:0}44.43%,96%{opacity:1}100%{opacity:0}}
-.l21{animation:k21 30.0s linear infinite}@keyframes k21{0%,45.67%{opacity:0}46.27%,96%{opacity:1}100%{opacity:0}}
+.s{font-family:'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif}.m{font-family:'Cascadia Mono', ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}
+@keyframes draw{from{stroke-dashoffset:1.05}to{stroke-dashoffset:0}}
+@keyframes fade{from{opacity:0}}
+.l0{animation:fade .3s ease-out 0.50s both}
+.l1{animation:fade .3s ease-out 1.40s both}
+.l2{animation:fade .3s ease-out 1.82s both}
+.l3{animation:fade .3s ease-out 2.24s both}
+.l4{animation:fade .3s ease-out 2.66s both}
+.l5{animation:fade .3s ease-out 3.08s both}
+.l6{animation:fade .3s ease-out 3.50s both}
+.l7{animation:fade .3s ease-out 3.92s both}
+.l9{animation:fade .3s ease-out 4.84s both}
+.l10{animation:fade .3s ease-out 5.26s both}
+.l11{animation:fade .3s ease-out 5.68s both}
+.l12{animation:fade .3s ease-out 6.10s both}
+.l14{animation:fade .3s ease-out 7.02s both}
+.l15{animation:fade .3s ease-out 7.92s both}
+.l16{animation:fade .3s ease-out 8.34s both}
+.l17{animation:fade .3s ease-out 9.24s both}
+.l18{animation:fade .3s ease-out 9.66s both}
+.l19{animation:fade .3s ease-out 10.08s both}
+.l20{animation:fade .3s ease-out 10.50s both}
+.l21{animation:fade .3s ease-out 10.92s both}
+.l9{animation:fade .5s ease-out 4.1s both}
+.cur{animation:fade .1s 11.34s both,blink 1s steps(1) 11.44s 3}@keyframes blink{50%{opacity:0}}
 @media (prefers-reduced-motion: reduce){*{animation:none!important}}
 </style>
-<rect width="960" height="548" rx="14" fill="#0c1726"/>
-<rect x="0.5" y="0.5" width="959" height="547" rx="14" fill="none" stroke="#2c4361"/>
-<line x1="0" y1="40" x2="960" y2="40" stroke="#2c4361" stroke-width="1" />
-<circle cx="24" cy="20" r="5" fill="#2c4361"/>
-<circle cx="42" cy="20" r="5" fill="#2c4361"/>
-<circle cx="60" cy="20" r="5" fill="#2c4361"/>
-<text x="480.0" y="25" class="s" font-size="12.5" fill="#8da2b9" text-anchor="middle" font-weight="400" >the stub demo: no tokens spent</text>
-<text class="m l0" x="30" y="64" font-size="13.5" fill="#e9eff6" font-weight="600" xml:space="preserve"><tspan fill="#8da2b9">$ </tspan>python -m parallax demo --stub</text>
-<text class="m l1" x="30" y="85" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: opened (behavior); builder codex, challenger claude</text>
-<text class="m l2" x="30" y="106" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: claude&#x27;s reading sealed</text>
-<text class="m l3" x="30" y="127" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: codex&#x27;s reading sealed</text>
-<text class="m l4" x="30" y="148" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: claude&#x27;s reveal done</text>
-<text class="m l5" x="30" y="169" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: codex&#x27;s reveal done</text>
-<text class="m l6" x="30" y="190" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: settlement published (direct)</text>
-<text class="m l7" x="30" y="211" font-size="13.5" fill="#e9eff6" font-weight="600" xml:space="preserve">clamp-001: needs a ruling on D-clamp-001-1</text>
-<text class="m l9" x="30" y="253" font-size="13.5" fill="#e9eff6" font-weight="400" xml:space="preserve">Dispute D-clamp-001-1 (reading)    What if lo &gt; hi?</text>
-<text class="m l10" x="30" y="274" font-size="13.5" fill="#5cc8f2" font-weight="400" xml:space="preserve">  a) codex (builder):      raise ValueError</text>
-<text class="m l11" x="30" y="295" font-size="13.5" fill="#f5b041" font-weight="400" xml:space="preserve">  b) claude (challenger):  swap the bounds</text>
-<text class="m l12" x="30" y="316" font-size="13.5" fill="#e9eff6" font-weight="400" xml:space="preserve">  witness: clamp(5, 10, 1)   a raises ValueError, b returns 5</text>
-<text class="m l14" x="30" y="358" font-size="13.5" fill="#e9eff6" font-weight="600" xml:space="preserve"><tspan fill="#8da2b9">$ </tspan>python -m parallax rule D-clamp-001-1 a</text>
-<text class="m l15" x="30" y="379" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">recorded D-clamp-001-1: a</text>
-<text class="m l16" x="30" y="400" font-size="13.5" fill="#e9eff6" font-weight="600" xml:space="preserve"><tspan fill="#8da2b9">$ </tspan>python -m parallax demo --stub</text>
-<text class="m l17" x="30" y="421" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: contract v1 frozen</text>
-<text class="m l18" x="30" y="442" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: codex&#x27;s build 1 finished</text>
-<text class="m l19" x="30" y="463" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: claude&#x27;s probe 1 finished</text>
-<text class="m l20" x="30" y="484" font-size="13.5" fill="#c3d0de" font-weight="400" xml:space="preserve">clamp-001: crossing 1: check passed, 3 of 3 mutants caught</text>
-<text class="m l21" x="30" y="505" font-size="13.5" fill="#e9eff6" font-weight="600" xml:space="preserve">clamp-001: landed 1a0a4035f05a   Verdict: ruled</text>
+<defs>
+<clipPath id="clip"><rect width="960" height="864" rx="16"/></clipPath>
+<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#060c16"/><stop offset="1" stop-color="#0a1422"/></linearGradient>
+<radialGradient id="vig" cx=".5" cy=".42" r=".8"><stop offset=".5" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></radialGradient>
+<filter id="noise" x="0" y="0" width="1" height="1"><feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" seed="7" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 .28 0 0 0 -.1"/></filter>
+<pattern id="grain" width="180" height="180" patternUnits="userSpaceOnUse"><rect width="180" height="180" filter="url(#noise)"/></pattern>
+<pattern id="fold" width="24" height="6" patternUnits="userSpaceOnUse"><rect width="12" height="6" fill="#5cc8f2"/><rect x="12" width="12" height="6" fill="#f5b041"/></pattern>
+<radialGradient id="hw"><stop offset="0" stop-color="#fff"/><stop offset=".22" stop-color="#f5b041" stop-opacity=".9"/><stop offset="1" stop-color="#f5b041" stop-opacity="0"/></radialGradient>
+<radialGradient id="hc"><stop offset="0" stop-color="#fff"/><stop offset=".22" stop-color="#5cc8f2" stop-opacity=".9"/><stop offset="1" stop-color="#5cc8f2" stop-opacity="0"/></radialGradient>
+<radialGradient id="hx"><stop offset="0" stop-color="#fff"/><stop offset=".3" stop-color="#fff" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+<marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 1 9 5 0 9z" fill="#8da2b9"/></marker>
+<pattern id="foldv" width="6" height="24" patternUnits="userSpaceOnUse"><rect width="6" height="12" fill="#5cc8f2"/><rect y="12" width="6" height="12" fill="#f5b041"/></pattern>
+</defs>
+<g clip-path="url(#clip)">
+<rect width="960" height="864" fill="url(#bg)"/>
+<rect width="960" height="864" fill="url(#vig)"/>
+<rect width="960" height="864" fill="url(#grain)"/>
+<rect x="0" y="5" width="960" height="55" fill="#04080e" fill-opacity=".7"/>
+<path d="M0 60H960" stroke="#fff" stroke-opacity=".08"/>
+<circle cx="34" cy="33" r="6" fill="#2c4361"/>
+<circle cx="56" cy="33" r="6" fill="#2c4361"/>
+<circle cx="78" cy="33" r="6" fill="#2c4361"/>
+<text x="480" y="40" class="s" font-size="21" fill="#8da2b9" text-anchor="middle">the stub demo: no tokens spent</text>
+<rect x="26" y="379" width="908" height="144" rx="8" fill="#13243b" fill-opacity=".55" stroke="#fff" stroke-width="1.4" stroke-opacity=".22" class="l9"/>
+<rect class="l9" x="26" y="387" width="5" height="128" fill="url(#foldv)"/>
+<text x="38" y="114" class="m l0" font-size="23" xml:space="preserve"><tspan fill="#8da2b9">$ </tspan><tspan fill="#e9eff6" font-weight="600">python -m parallax demo --stub</tspan></text>
+<text x="38" y="148" class="m l1" font-size="23" xml:space="preserve"><tspan fill="#c3d0de">clamp-001: opened (behavior); builder </tspan><tspan fill="#5cc8f2" font-weight="600">codex</tspan><tspan fill="#c3d0de">, challenger </tspan><tspan fill="#f5b041" font-weight="600">claude</tspan></text>
+<text x="38" y="182" class="m l2" font-size="23" xml:space="preserve"><tspan fill="#c3d0de">clamp-001: </tspan><tspan fill="#f5b041" font-weight="600">claude</tspan><tspan fill="#c3d0de">&#x27;s reading sealed</tspan></text>
+<text x="38" y="216" class="m l3" font-size="23" xml:space="preserve"><tspan fill="#c3d0de">clamp-001: </tspan><tspan fill="#5cc8f2" font-weight="600">codex</tspan><tspan fill="#c3d0de">&#x27;s reading sealed</tspan></text>
+<text x="38" y="250" class="m l4" font-size="23" xml:space="preserve"><tspan fill="#c3d0de">clamp-001: </tspan><tspan fill="#f5b041" font-weight="600">claude</tspan><tspan fill="#c3d0de">&#x27;s reveal done</tspan></text>
+<text x="38" y="284" class="m l5" font-size="23" xml:space="preserve"><tspan fill="#c3d0de">clamp-001: </tspan><tspan fill="#5cc8f2" font-weight="600">codex</tspan><tspan fill="#c3d0de">&#x27;s reveal done</tspan></text>
+<text x="38" y="318" class="m l6" font-size="23" xml:space="preserve"><tspan fill="#c3d0de">clamp-001: settlement published (direct)</tspan></text>
+<text x="38" y="352" class="m l7" font-size="23" xml:space="preserve"><tspan fill="#e9eff6" font-weight="600">clamp-001: needs a ruling on D-clamp-001-1</tspan></text>
+<text x="52" y="406" class="m l9" font-size="23" xml:space="preserve"><tspan fill="#e9eff6">Dispute D-clamp-001-1 (reading)    What if lo &gt; hi?</tspan></text>
+<text x="52" y="440" class="m l10" font-size="23" xml:space="preserve"><tspan fill="#e9eff6">  a) </tspan><tspan fill="#5cc8f2" font-weight="600">codex</tspan><tspan fill="#e9eff6"> (builder):      raise ValueError</tspan></text>
+<text x="52" y="474" class="m l11" font-size="23" xml:space="preserve"><tspan fill="#e9eff6">  b) </tspan><tspan fill="#f5b041" font-weight="600">claude</tspan><tspan fill="#e9eff6"> (challenger):  swap the bounds</tspan></text>
+<text x="52" y="508" class="m l12" font-size="23" xml:space="preserve"><tspan fill="#e9eff6">  witness: clamp(5, 10, 1)   a raises ValueError, b returns 5</tspan></text>
+<text x="38" y="562" class="m l14" font-size="23" xml:space="preserve"><tspan fill="#8da2b9">$ </tspan><tspan fill="#e9eff6" font-weight="600">python -m parallax rule D-clamp-001-1 a</tspan></text>
+<text x="38" y="596" class="m l15" font-size="23" xml:space="preserve"><tspan fill="#c3d0de">recorded D-clamp-001-1: a</tspan></text>
+<text x="38" y="630" class="m l16" font-size="23" xml:space="preserve"><tspan fill="#8da2b9">$ </tspan><tspan fill="#e9eff6" font-weight="600">python -m parallax demo --stub</tspan></text>
+<text x="38" y="664" class="m l17" font-size="23" xml:space="preserve"><tspan fill="#c3d0de">clamp-001: contract v1 frozen</tspan></text>
+<text x="38" y="698" class="m l18" font-size="23" xml:space="preserve"><tspan fill="#c3d0de">clamp-001: </tspan><tspan fill="#5cc8f2" font-weight="600">codex</tspan><tspan fill="#c3d0de">&#x27;s build 1 finished</tspan></text>
+<text x="38" y="732" class="m l19" font-size="23" xml:space="preserve"><tspan fill="#c3d0de">clamp-001: </tspan><tspan fill="#f5b041" font-weight="600">claude</tspan><tspan fill="#c3d0de">&#x27;s probe 1 finished</tspan></text>
+<text x="38" y="766" class="m l20" font-size="23" xml:space="preserve"><tspan fill="#c3d0de">clamp-001: crossing 1: check passed, 3 of 3 mutants caught</tspan></text>
+<text x="38" y="800" class="m l21" font-size="23" xml:space="preserve"><tspan fill="#e9eff6" font-weight="600">clamp-001: landed 1a0a4035f05a   Verdict: ruled</tspan></text>
+<rect class="cur" x="38" y="814" width="13" height="24" fill="#e9eff6" fill-opacity=".85"/>
+<rect width="960" height="5" fill="url(#fold)"/>
+</g>
+<rect x=".5" y=".5" width="959" height="863" rx="15.5" fill="none" stroke="#fff" stroke-opacity=".1"/>
 </svg>
