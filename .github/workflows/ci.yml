@@ -25,12 +25,16 @@ jobs:
       - run: python scripts/ci/check_repo.py
 
   tests:
-    name: Tests (Windows, Python 3.12)
+    name: Tests ${{ matrix.shard }} of 4 (Windows, Python 3.12)
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - run: python -m unittest discover -s tests -t . --durations 20
+      - run: python scripts/ci/run_tests.py --shard ${{ matrix.shard }} --of 4
